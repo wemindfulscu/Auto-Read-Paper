@@ -52,6 +52,10 @@ jobs:
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
+          # GitHub Actions exports empty string when vars.X is unset, which defeats
+          # OmegaConf's ${oc.env:X,default} fallback. Re-default here.
+          if [ -z "${OPENAI_MODEL:-}" ]; then export OPENAI_MODEL="gpt-4o-mini"; fi
+          echo "Using OPENAI_MODEL=$OPENAI_MODEL"
           if [ -n "$CUSTOM_CONFIG" ]; then
             printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
             echo "Wrote config/custom.yaml from CUSTOM_CONFIG repo variable."
