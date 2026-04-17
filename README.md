@@ -166,9 +166,15 @@ High-scoring papers are **never buried**:
        key: ${oc.env:OPENAI_API_KEY}
        base_url: ${oc.env:OPENAI_API_BASE}
      generation_kwargs:
-       model: ${oc.env:OPENAI_MODEL,gpt-4o-mini}  # Picks up the OPENAI_MODEL repo variable
-       max_tokens: ${oc.decode:${oc.env:OPENAI_MAX_TOKENS,4096}}  # Per-request output cap; keep <= model context window
-     language: Chinese
+       model: ${oc.env:OPENAI_MODEL,gpt-4o-mini}                 # Model id. Picks up the OPENAI_MODEL repo variable. Examples: gpt-4o-mini, deepseek-chat, Qwen/Qwen2.5-72B-Instruct
+       max_tokens: ${oc.decode:${oc.env:OPENAI_MAX_TOKENS,4096}} # Per-request OUTPUT token cap. Default 4096. MUST be <= model context window:
+                                                                 #   gpt-4o-mini       → up to 16384
+                                                                 #   deepseek-chat     → up to 8192
+                                                                 #   most Qwen / SiliconFlow tiers → 8192
+                                                                 # Setting this too high yields `400 Invalid max_tokens value` from the provider.
+       temperature: 0.3                                          # 0.0 = deterministic, 1.0 = creative. 0.2-0.4 works well for scoring + summarization.
+       # top_p: 0.9                                              # Optional nucleus sampling. Usually leave unset; tune only if outputs feel too repetitive/random.
+     language: Chinese                                           # Output language for the deep-read summary. Examples: Chinese, English, Japanese. If set to English, the email drops the bilingual title row.
 
    source:
      arxiv:
@@ -184,8 +190,8 @@ High-scoring papers are **never buried**:
      send_empty: false
      max_paper_num: 10                     # Top-N papers shown in the email
      source: ['arxiv']
-     # reader_reviewer = 多智能体 (Reader + Reviewer, 默认, 推荐)
-     # keyword_llm     = 单智能体 (逐篇 LLM 打分)
+     # reader_reviewer = multi-agent (Reader + Reviewer, default, recommended: global calibration + token-efficient)
+     # keyword_llm     = single-agent (per-paper LLM scoring; simpler, more API calls)
      reranker: reader_reviewer
    ```
 
