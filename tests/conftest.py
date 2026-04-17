@@ -36,6 +36,7 @@ def _base_config():
                 "source.arxiv.keywords=[test]",
                 "executor.source=[arxiv]",
                 "executor.reranker=keyword_llm",
+                "history.enabled=false",
                 "executor.debug=false",
                 "executor.send_empty=false",
             ],

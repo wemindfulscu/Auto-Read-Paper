@@ -32,6 +32,7 @@ No reading list, no local machine, no Zotero. Just keywords.
 - **Chinese structured summary** — each paper in the email gets a three-section AI breakdown: 核心工作 / 主要创新 / 潜在价值.
 - **HTML email delivery** — clean paper cards with score, authors, affiliations, PDF link (same layout as upstream zotero-arxiv-daily).
 - **Full-text aware** — extracts TeX / HTML / PDF to feed the LLM, not just the abstract.
+- **Rolling 7-day pool** — unsent high-scoring papers carry over: if today's crop is weak, yesterday's runner-up gets its turn. State persisted in `state/score_history.json`.
 
 ## 📷 Screenshot
 
@@ -126,6 +127,7 @@ See [config/base.yaml](config/base.yaml) for every available knob, including:
 - `reranker.reader_reviewer.reviewer_max_papers` — cap how many papers go into the single Reviewer batch call.
 - `source.arxiv.include_cross_list` — include cross-listed papers.
 - `executor.send_empty` — still send the email even when no paper matched.
+- `history.enabled` / `history.retention_days` — keep a rolling pool of scored-but-unsent papers for N days so the highest-scoring backlog gets surfaced.
 
 ### Local Running
 

@@ -35,6 +35,11 @@ reranker:
     reader_max_input_tokens: 3000 # Truncate title+abstract+full_text fed to each Reader call.
     reviewer_max_papers: 60 # Max candidates sent in the single Reviewer batch (token budget).
 
+history:
+  enabled: true # Roll scored-but-unsent papers forward so high-scoring backlog eventually surfaces.
+  path: state/score_history.json # Relative to repo root; committed back after each successful email.
+  retention_days: 7 # Drop papers older than this from the history pool.
+
 executor:
   debug: false # Debug mode fetches only ~10 papers.
   send_empty: false # Send the email even when nothing matched today.
