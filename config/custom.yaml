@@ -1,8 +1,3 @@
-zotero:
-  user_id: ${oc.env:ZOTERO_ID,null}     # Leave unset to disable Zotero
-  api_key: ${oc.env:ZOTERO_KEY,null}
-  include_path: null
-
 email:
   sender: ${oc.env:SENDER}
   receiver: ${oc.env:RECEIVER}

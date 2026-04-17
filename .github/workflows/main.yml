@@ -1,26 +1,43 @@
-name: Send emails daily
+name: Send paper digest daily
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 22 * * *'
+    # Runs hourly. The job checks SEND_HOUR_BJ (Beijing hour, 0-23, default 7)
+    # and skips unless the current Beijing hour matches — so only one real run per day.
+    - cron: '5 * * * *'
 
 jobs:
-  calculate-and-send:
+  send-digest:
     runs-on: ubuntu-latest
     steps:
+      - name: Check Beijing-time schedule
+        id: schedule_check
+        env:
+          SEND_HOUR_BJ: ${{ vars.SEND_HOUR_BJ }}
+        run: |
+          target_hour="${SEND_HOUR_BJ:-7}"
+          current_bj_hour=$(TZ=Asia/Shanghai date +%-H)
+          echo "Beijing hour now = $current_bj_hour, target = $target_hour, trigger = ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$current_bj_hour" = "$target_hour" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping — Beijing hour $current_bj_hour != $target_hour"
+          fi
+
       - name: Checkout
+        if: steps.schedule_check.outputs.run == 'true'
         uses: actions/checkout@v6
-        with:
-          repository: ${{ vars.REPOSITORY }}
-          ref: ${{ vars.REF }}
 
       - name: Setup uv
+        if: steps.schedule_check.outputs.run == 'true'
         uses: astral-sh/setup-uv@v7
 
       - name: Run script
+        if: steps.schedule_check.outputs.run == 'true'
         env:
-          ZOTERO_ID: ${{ secrets.ZOTERO_ID }}
-          ZOTERO_KEY: ${{ secrets.ZOTERO_KEY }}
           SENDER: ${{ secrets.SENDER }}
           RECEIVER: ${{ secrets.RECEIVER }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
