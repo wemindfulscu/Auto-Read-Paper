@@ -10,7 +10,7 @@ Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's
 
 ```bash
 # Run the application
-uv run src/zotero_arxiv_daily/main.py
+uv run src/auto_read_paper/main.py
 
 # Run tests (excludes slow tests by default)
 uv run pytest
@@ -29,7 +29,7 @@ No linter or formatter is configured.
 
 ## Architecture
 
-The app follows a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_daily/executor.py`):
+The app follows a linear pipeline orchestrated by `Executor` (`src/auto_read_paper/executor.py`):
 
 1. **Fetch Zotero corpus** — retrieves user's library papers via pyzotero API
 2. **Filter corpus** — applies `include_path` glob patterns to select relevant collections
@@ -40,9 +40,9 @@ The app follows a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_
 
 ### Plugin Systems
 
-**Retrievers** (`src/zotero_arxiv_daily/retriever/`): Register via `@register_retriever` decorator, discovered by `get_retriever_cls()`. Each retriever implements `_retrieve_raw_papers()` and `convert_to_paper()`.
+**Retrievers** (`src/auto_read_paper/retriever/`): Register via `@register_retriever` decorator, discovered by `get_retriever_cls()`. Each retriever implements `_retrieve_raw_papers()` and `convert_to_paper()`.
 
-**Rerankers** (`src/zotero_arxiv_daily/reranker/`): Register via `@register_reranker` decorator, discovered by `get_reranker_cls()`. Two implementations: `local` (sentence-transformers) and `api` (OpenAI-compatible embeddings endpoint).
+**Rerankers** (`src/auto_read_paper/reranker/`): Register via `@register_reranker` decorator, discovered by `get_reranker_cls()`. Two implementations: `local` (sentence-transformers) and `api` (OpenAI-compatible embeddings endpoint).
 
 ### Configuration
 
@@ -50,7 +50,7 @@ Uses Hydra + OmegaConf. Config is composed from `config/base.yaml` (defaults) + 
 
 ### Data Classes
 
-`Paper` and `CorpusPaper` in `src/zotero_arxiv_daily/protocol.py`. `Paper` has LLM-powered methods (`generate_tldr`, `generate_affiliations`) that call the OpenAI API directly.
+`Paper` and `CorpusPaper` in `src/auto_read_paper/protocol.py`. `Paper` has LLM-powered methods (`generate_tldr`, `generate_affiliations`) that call the OpenAI API directly.
 
 ## Testing
 
@@ -64,7 +64,7 @@ uv run pytest
 uv run pytest -m ""
 
 # Run with coverage
-uv run pytest --cov=src/zotero_arxiv_daily --cov-report=term-missing
+uv run pytest --cov=src/auto_read_paper --cov-report=term-missing
 ```
 
 ## gstack

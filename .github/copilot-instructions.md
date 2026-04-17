@@ -11,7 +11,7 @@ Zotero-arXiv-Daily recommends new arXiv/bioRxiv/medRxiv papers based on a user's
 uv sync
 
 # Run the application
-uv run src/zotero_arxiv_daily/main.py
+uv run src/auto_read_paper/main.py
 
 # Run tests (excludes slow tests by default)
 uv run pytest
@@ -27,7 +27,7 @@ No linter or formatter is configured.
 
 ## Architecture
 
-The app is a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_daily/executor.py`):
+The app is a linear pipeline orchestrated by `Executor` (`src/auto_read_paper/executor.py`):
 
 1. **Fetch Zotero corpus** → pyzotero API
 2. **Filter corpus** → `include_path` / `ignore_path` glob patterns
@@ -38,9 +38,9 @@ The app is a linear pipeline orchestrated by `Executor` (`src/zotero_arxiv_daily
 
 ### Plugin Systems
 
-**Retrievers** (`src/zotero_arxiv_daily/retriever/`): Register via `@register_retriever("name")` decorator on a `BaseRetriever` subclass. Each retriever implements `_retrieve_raw_papers()` and `convert_to_paper()`. Discovered at runtime via `get_retriever_cls(name)` from a module-level `registered_retrievers` dict.
+**Retrievers** (`src/auto_read_paper/retriever/`): Register via `@register_retriever("name")` decorator on a `BaseRetriever` subclass. Each retriever implements `_retrieve_raw_papers()` and `convert_to_paper()`. Discovered at runtime via `get_retriever_cls(name)` from a module-level `registered_retrievers` dict.
 
-**Rerankers** (`src/zotero_arxiv_daily/reranker/`): Register via `@register_reranker("name")` decorator on a `BaseReranker` subclass. Two implementations: `local` (sentence-transformers) and `api` (OpenAI-compatible embeddings endpoint). Discovered via `get_reranker_cls(name)`.
+**Rerankers** (`src/auto_read_paper/reranker/`): Register via `@register_reranker("name")` decorator on a `BaseReranker` subclass. Two implementations: `local` (sentence-transformers) and `api` (OpenAI-compatible embeddings endpoint). Discovered via `get_reranker_cls(name)`.
 
 When adding a new retriever or reranker, follow the existing pattern: create a new file, subclass the base, apply the registration decorator, and implement the abstract methods.
 
@@ -50,7 +50,7 @@ Uses Hydra + OmegaConf. Config composes from `config/base.yaml` (defaults with `
 
 ### Data Classes
 
-`Paper` and `CorpusPaper` in `src/zotero_arxiv_daily/protocol.py`. `Paper` has LLM-powered methods (`generate_tldr`, `generate_affiliations`) that call the OpenAI API directly with `tiktoken`-based token truncation.
+`Paper` and `CorpusPaper` in `src/auto_read_paper/protocol.py`. `Paper` has LLM-powered methods (`generate_tldr`, `generate_affiliations`) that call the OpenAI API directly with `tiktoken`-based token truncation.
 
 ## Testing Conventions
 
@@ -58,7 +58,7 @@ Uses Hydra + OmegaConf. Config composes from `config/base.yaml` (defaults with `
 - A session-scoped Hydra config in `tests/conftest.py` is deep-copied per test via the `config` fixture.
 - Canned response factories live in `tests/canned_responses.py` (e.g., `make_stub_openai_client()`, `make_stub_zotero_client()`).
 - Tests marked `@pytest.mark.slow` require heavy dependencies (model downloads) and are excluded by default (`addopts = "-m 'not slow'"` in pyproject.toml).
-- Monkeypatching targets the module-level import path (e.g., `"zotero_arxiv_daily.executor.zotero.Zotero"`).
+- Monkeypatching targets the module-level import path (e.g., `"auto_read_paper.executor.zotero.Zotero"`).
 
 ## Coding Conventions
 

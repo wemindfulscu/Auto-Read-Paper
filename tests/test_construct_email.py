@@ -1,6 +1,6 @@
-"""Tests for zotero_arxiv_daily.construct_email: render_email, get_stars, get_block_html."""
+"""Tests for auto_read_paper.construct_email: render_email, get_stars, get_block_html."""
 
-from zotero_arxiv_daily.construct_email import render_email, get_stars, get_block_html, get_empty_html
+from auto_read_paper.construct_email import render_email, get_stars, get_block_html, get_empty_html
 from tests.canned_responses import make_sample_paper
 
 

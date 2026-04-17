@@ -5,7 +5,7 @@ from omegaconf import DictConfig
 import hydra
 from loguru import logger
 import dotenv
-from zotero_arxiv_daily.executor import Executor
+from auto_read_paper.executor import Executor
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 dotenv.load_dotenv()
 
@@ -21,7 +21,7 @@ def main(config:DictConfig):
     )
     
     for logger_name in logging.root.manager.loggerDict:
-        if "zotero_arxiv_daily" in logger_name:
+        if "auto_read_paper" in logger_name:
             continue
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 

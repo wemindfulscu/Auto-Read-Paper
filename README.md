@@ -61,6 +61,7 @@ No reading list, no local machine, no Zotero. Just keywords.
    | Variable | Description | Example |
    | :--- | :--- | :--- |
    | `SEND_HOUR_BJ` | Beijing hour (0-23) at which the daily email is sent. Default `7`. | `7` |
+   | `OPENAI_MODEL` | LLM model id used for both scoring and the deep-read summary. Any model your `OPENAI_API_BASE` provider serves. Default `gpt-4o-mini`. | `gpt-4o-mini`, `deepseek-chat`, `Qwen/Qwen2.5-72B-Instruct` |
    | `CUSTOM_CONFIG` | The full YAML configuration (see below). | *(multi-line YAML)* |
 
    ![custom_config](./assets/config_var.png)
@@ -80,7 +81,7 @@ No reading list, no local machine, no Zotero. Just keywords.
        key: ${oc.env:OPENAI_API_KEY}
        base_url: ${oc.env:OPENAI_API_BASE}
      generation_kwargs:
-       model: gpt-4o-mini                  # Or any OpenAI-compatible model
+       model: ${oc.env:OPENAI_MODEL,gpt-4o-mini}  # Picks up the OPENAI_MODEL repo variable
      language: Chinese
 
    source:
@@ -124,7 +125,7 @@ Powered by [uv](https://github.com/astral-sh/uv):
 # export OPENAI_API_KEY=... OPENAI_API_BASE=...
 cd Auto-Read-Paper
 uv sync
-DEBUG=true uv run src/zotero_arxiv_daily/main.py
+DEBUG=true uv run src/auto_read_paper/main.py
 ```
 
 ## 📖 How it works

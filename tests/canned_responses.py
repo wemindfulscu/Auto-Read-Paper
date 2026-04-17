@@ -3,7 +3,7 @@
 from datetime import datetime
 from types import SimpleNamespace
 
-from zotero_arxiv_daily.protocol import CorpusPaper, Paper
+from auto_read_paper.protocol import CorpusPaper, Paper
 
 
 # ---------------------------------------------------------------------------
