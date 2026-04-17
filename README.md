@@ -45,6 +45,13 @@ No reading list, no local machine, no Zotero. Just keywords.
    ![fork](./assets/fork.png)
 
 2. **Set GitHub Action repository secrets.** They are invisible after saving, even to you.
+
+   > **About Secrets vs Variables.** GitHub Actions exposes two kinds of repo-level configuration:
+   > - **Secrets** (`${{ secrets.X }}`): encrypted, masked as `***` in logs, never readable after save. Use these for **anything sensitive** — passwords, API keys, SMTP auth codes.
+   > - **Variables** (`${{ vars.X }}`): plain-text, visible in logs, editable any time. Use these for **non-sensitive config** — model id, schedule hour, feature toggles.
+   >
+   > Both live under repo **Settings → Secrets and variables → Actions** but in *separate tabs*. Neither is inherited when someone forks — every fork must set its own.
+
    ![secrets](./assets/secrets.png)
 
    | Key | Description | Example |
