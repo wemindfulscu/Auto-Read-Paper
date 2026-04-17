@@ -1,0 +1,33 @@
+zotero:
+  user_id: ${oc.env:ZOTERO_ID,null}     # Leave unset to disable Zotero
+  api_key: ${oc.env:ZOTERO_KEY,null}
+  include_path: null
+
+email:
+  sender: ${oc.env:SENDER}
+  receiver: ${oc.env:RECEIVER}
+  smtp_server: smtp.qq.com
+  smtp_port: 465
+  sender_password: ${oc.env:SENDER_PASSWORD}
+
+llm:
+  api:
+    key: ${oc.env:OPENAI_API_KEY}
+    base_url: ${oc.env:OPENAI_API_BASE}
+  generation_kwargs:
+    model: gpt-4o-mini
+
+source:
+  arxiv:
+    category: ["cs.AI","cs.LG","cs.RO"]
+    include_cross_list: true
+    keywords:
+      - "reinforcement learning"
+      - "model predictive control"
+      - "residual policy"
+
+executor:
+  debug: ${oc.env:DEBUG,null}
+  max_paper_num: 10
+  source: ['arxiv']
+  reranker: keyword_llm
