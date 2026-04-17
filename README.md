@@ -57,11 +57,26 @@ No reading list, no local machine, no Zotero. Just keywords.
 
    | Key | Description | Example |
    | :--- | :--- | :--- |
-   | `SENDER` | SMTP sender account. | `abc@qq.com` |
-   | `SENDER_PASSWORD` | SMTP **auth code** (NOT your web login password — ask your email provider). | `abcdefghijklmn` |
-   | `RECEIVER` | Inbox that receives the paper digest. | `abc@outlook.com` |
+   | `SENDER` | **The email account that SENDS the digest** (outbox). Needs SMTP access — usually the same as your login email. | `abc@qq.com` |
+   | `SENDER_PASSWORD` | **SMTP auth code for `SENDER`** — a special password issued by the email provider for third-party SMTP clients. **NOT your webmail login password.** See "SMTP auth code how-to" below. | `abcdefghijklmn` |
+   | `RECEIVER` | **The email account that RECEIVES the digest** (inbox). Can be any address, same provider or different, no SMTP setup needed. | `abc@outlook.com` |
    | `OPENAI_API_KEY` | API key for the LLM. Any OpenAI-compatible provider works (OpenAI, DeepSeek, SiliconFlow, Qwen, etc.). | `sk-xxx` |
    | `OPENAI_API_BASE` | Base URL of the LLM API. | `https://api.openai.com/v1` |
+
+   > **Quick mental model** — there are three email-related values, don't mix them up:
+   > - `SENDER` = **outbox address** (sends the mail). Needs a matching `SENDER_PASSWORD` auth code **and** a matching `smtp_server` / `smtp_port` in the YAML config below.
+   > - `SENDER_PASSWORD` = **SMTP auth code of the SENDER** (not your regular password). Generated in the SENDER account's web settings.
+   > - `RECEIVER` = **inbox address** (reads the mail). No credentials needed; just tells the SENDER where to deliver.
+   >
+   > `SENDER` and `RECEIVER` can be the **same address** (send-to-self is fine) or **different** providers (e.g. send via QQ, receive on Gmail). Only the SENDER side has SMTP credentials to set up.
+
+   > **SMTP auth code how-to** — most providers disable plain-password SMTP for security. You must enable SMTP/IMAP in your email account's web settings, which then hands you a ~16-char auth code to paste into `SENDER_PASSWORD`:
+   > - **QQ Mail (`smtp.qq.com:465`)**: Settings → Account → POP3/IMAP/SMTP → enable "IMAP/SMTP服务" → send the verification SMS → copy the 16-char 授权码.
+   > - **163 / NetEase (`smtp.163.com:465`)**: 设置 → POP3/SMTP/IMAP → 开启 "IMAP/SMTP服务" → 授权码.
+   > - **Gmail (`smtp.gmail.com:465`)**: enable 2-Step Verification → myaccount.google.com/apppasswords → create "App password" → copy the 16-char code (remove spaces).
+   > - **Outlook / Office 365 (`smtp.office365.com:587`)**: enable 2FA → account.microsoft.com → Security → App passwords → generate. Note port 587 + STARTTLS differs from 465.
+   >
+   > If SMTP auth fails (`535 authentication failed` in the workflow log), nine times out of ten the auth code is wrong, expired, or contains pasted-in spaces. Re-issue and re-paste. The `SENDER` address and `smtp_server` must both belong to the same provider — `SENDER=abc@qq.com` + `smtp_server=smtp.163.com` will not work.
 
 3. **Set GitHub Action repository variables** (Variables tab, *not* Secrets).
    ![vars](./assets/repo_var.png)
@@ -79,11 +94,15 @@ No reading list, no local machine, no Zotero. Just keywords.
 
    ```yaml
    email:
-     sender: ${oc.env:SENDER}
-     receiver: ${oc.env:RECEIVER}
-     smtp_server: smtp.qq.com              # Your email provider's SMTP server
-     smtp_port: 465
-     sender_password: ${oc.env:SENDER_PASSWORD}
+     sender: ${oc.env:SENDER}              # Outbox address (same as SENDER secret)
+     receiver: ${oc.env:RECEIVER}          # Inbox address (same as RECEIVER secret)
+     smtp_server: smtp.qq.com              # SMTP host of the SENDER's provider. MUST match SENDER:
+                                           #   abc@qq.com      → smtp.qq.com
+                                           #   abc@163.com     → smtp.163.com
+                                           #   abc@gmail.com   → smtp.gmail.com
+                                           #   abc@outlook.com → smtp.office365.com (port 587)
+     smtp_port: 465                        # 465 for SSL (qq/163/gmail); 587 for STARTTLS (outlook)
+     sender_password: ${oc.env:SENDER_PASSWORD}   # SMTP auth code, NOT the webmail login password
 
    llm:
      api:
