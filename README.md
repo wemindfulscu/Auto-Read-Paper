@@ -119,9 +119,11 @@ No reading list, no local machine, no Zotero. Just keywords.
 ### Full configuration reference
 
 See [config/base.yaml](config/base.yaml) for every available knob, including:
+- `executor.reranker` — pick `keyword_llm` (per-paper LLM scoring, simple) or `reader_reviewer` (two-agent: Reader takes structured notes per paper, Reviewer batch-ranks them in one call).
 - `reranker.keyword_llm.weights` — reweight innovation/relevance/potential.
-- `reranker.keyword_llm.threshold` — drop papers below a minimum composite score.
-- `reranker.keyword_llm.concurrency` — parallel LLM scoring requests.
+- `reranker.keyword_llm.threshold` / `reranker.reader_reviewer.threshold` — drop papers below a minimum score.
+- `reranker.keyword_llm.concurrency` / `reranker.reader_reviewer.concurrency` — parallel LLM requests.
+- `reranker.reader_reviewer.reviewer_max_papers` — cap how many papers go into the single Reviewer batch call.
 - `source.arxiv.include_cross_list` — include cross-listed papers.
 - `executor.send_empty` — still send the email even when no paper matched.
 

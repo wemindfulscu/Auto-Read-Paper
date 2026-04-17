@@ -29,6 +29,11 @@ reranker:
       potential: 0.2
     concurrency: 4 # Concurrent LLM scoring requests.
     keyword_boost: 0.0 # Optional bonus score per extra keyword hit beyond the first.
+  reader_reviewer:
+    threshold: 0.0 # Drop papers scored below this by the Reviewer (0-10).
+    concurrency: 4 # Parallel Reader agents.
+    reader_max_input_tokens: 3000 # Truncate title+abstract+full_text fed to each Reader call.
+    reviewer_max_papers: 60 # Max candidates sent in the single Reviewer batch (token budget).
 
 executor:
   debug: false # Debug mode fetches only ~10 papers.
