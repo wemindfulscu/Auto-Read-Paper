@@ -1,3 +1,10 @@
+# Fallback config used only when the CUSTOM_CONFIG repo variable is unset/empty.
+# Intentionally left WITHOUT category/keywords so that a missing CUSTOM_CONFIG
+# fails loudly at startup (ArxivRetriever raises "category must be specified")
+# instead of silently running under upstream's example keywords.
+#
+# To configure the pipeline, set the CUSTOM_CONFIG repo variable — see README.
+
 email:
   sender: ${oc.env:SENDER}
   receiver: ${oc.env:RECEIVER}
@@ -15,20 +22,9 @@ llm:
     temperature: 0.3
   language: Chinese
 
-source:
-  arxiv:
-    category: ["cs.AI", "cs.LG", "cs.RO"]
-    include_cross_list: true
-    keywords:
-      - "reinforcement learning"
-      - "model predictive control"
-      - "residual policy"
-
 executor:
   debug: ${oc.env:DEBUG,null}
   send_empty: false
   max_paper_num: 10
   source: ['arxiv']
-  # 'reader_reviewer' = multi-agent (Reader notes + Reviewer global scoring, default, token-efficient, better ranking).
-  # 'keyword_llm'     = single-agent (per-paper LLM scoring, simpler).
   reranker: reader_reviewer

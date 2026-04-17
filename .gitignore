@@ -17,3 +17,6 @@ models
 test-compose.yml
 outputs
 config/private.yaml
+
+# Runtime state — persisted per-fork via actions/cache, not committed to git.
+state/score_history.json

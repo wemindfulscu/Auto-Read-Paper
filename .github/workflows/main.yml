@@ -10,8 +10,6 @@ on:
 jobs:
   send-digest:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # Needed to commit state/score_history.json back to the repo.
     steps:
       - name: Check Beijing-time schedule
         id: schedule_check
@@ -43,6 +41,19 @@ jobs:
         if: steps.schedule_check.outputs.run == 'true'
         uses: astral-sh/setup-uv@v7
 
+      # Rolling score history is persisted per-fork via actions/cache, not
+      # committed to git. This keeps each fork's state fully isolated (upstream
+      # never leaks its scored papers to downstream forks) and avoids bloating
+      # the repo with one commit per run.
+      - name: Restore rolling score history
+        if: steps.schedule_check.outputs.run == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: state/score_history.json
+          key: score-history-${{ github.run_id }}
+          restore-keys: |
+            score-history-
+
       - name: Run script
         if: steps.schedule_check.outputs.run == 'true'
         env:
@@ -62,28 +73,22 @@ jobs:
           echo "Using OPENAI_MODEL=$OPENAI_MODEL"
           echo "Using OPENAI_MAX_TOKENS=$OPENAI_MAX_TOKENS"
           if [ -n "$CUSTOM_CONFIG" ]; then
-            printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
+            # Use %s (not %b) so backslashes in the user's YAML are preserved literally.
+            printf "%s\n" "$CUSTOM_CONFIG" > config/custom.yaml
             echo "Wrote config/custom.yaml from CUSTOM_CONFIG repo variable."
           else
-            echo "::warning::CUSTOM_CONFIG repo variable is empty — falling back to repo's config/custom.yaml."
+            echo "::warning::CUSTOM_CONFIG repo variable is empty — falling back to repo's config/custom.yaml (neutral: will fail loudly)."
           fi
           echo "Effective config/custom.yaml:"
           cat config/custom.yaml
+          echo "---"
+          echo "Effective source.arxiv keywords (from the YAML above):"
+          awk '/^source:/{s=1} s && /^[^ ]/ && !/^source:/{s=0} s' config/custom.yaml | sed -n '/keywords:/,/^[^ ]/p' || true
           uv run src/auto_read_paper/main.py
 
-      - name: Commit rolling score history
+      - name: Save rolling score history
         if: steps.schedule_check.outputs.run == 'true' && success()
-        run: |
-          if [ ! -f state/score_history.json ]; then
-            echo "No state/score_history.json produced — nothing to commit."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state/score_history.json
-          if git diff --cached --quiet; then
-            echo "score_history.json unchanged — skipping commit."
-          else
-            git commit -m "chore: update rolling score history [skip ci]"
-            git push
-          fi
+        uses: actions/cache/save@v4
+        with:
+          path: state/score_history.json
+          key: score-history-${{ github.run_id }}

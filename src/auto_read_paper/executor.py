@@ -29,6 +29,16 @@ class Executor:
     def run(self):
         today = _today_iso()
 
+        # Surface effective arXiv filter config up-front so users can verify
+        # CUSTOM_CONFIG actually took effect (vs silently falling back to the
+        # committed config/custom.yaml).
+        arxiv_cfg = self.config.get("source", {}).get("arxiv") if hasattr(self.config, "get") else None
+        if arxiv_cfg is not None:
+            cats = list(arxiv_cfg.get("category") or [])
+            kws = list(arxiv_cfg.get("keywords") or [])
+            logger.info(f"Effective arXiv categories: {cats}")
+            logger.info(f"Effective arXiv keywords: {kws}")
+
         if self.history is not None:
             self.history.load()
             self.history.trim()
