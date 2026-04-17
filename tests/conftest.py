@@ -33,7 +33,7 @@ def _base_config():
                 "llm.api.base_url=http://localhost:30000/v1",
                 "llm.generation_kwargs.model=gpt-4o-mini",
                 "source.arxiv.category=[cs.AI,cs.CV]",
-                "source.arxiv.keywords=null",
+                "source.arxiv.keywords=[test]",
                 "executor.source=[arxiv]",
                 "executor.reranker=keyword_llm",
                 "executor.debug=false",
