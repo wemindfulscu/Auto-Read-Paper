@@ -112,6 +112,61 @@ class ArxivRetriever(BaseRetriever):
         if self.config.source.arxiv.category is None:
             raise ValueError("category must be specified for arxiv.")
 
+    def retrieve_recent_fallback(self, days: int = 3, limit: int = 10) -> list[ArxivResult]:
+        """Last-resort fetch: query arXiv API for recent papers in configured categories.
+
+        Used only when the primary RSS + history pool is empty (e.g. first-run empty
+        history + quiet day). Samples papers submitted in the last ``days`` days,
+        applies the keyword filter, and returns up to ``limit`` of them.
+        """
+        import random
+
+        client = arxiv.Client(num_retries=5, delay_seconds=5)
+        categories = list(self.config.source.arxiv.category)
+        cat_query = " OR ".join(f"cat:{c}" for c in categories)
+        # Pull generously, then filter by keywords + randomly sample.
+        search = arxiv.Search(
+            query=cat_query,
+            max_results=200,
+            sort_by=arxiv.SortCriterion.SubmittedDate,
+            sort_order=arxiv.SortOrder.Descending,
+        )
+        try:
+            results = list(client.results(search))
+        except Exception as exc:
+            logger.warning(f"Fallback arXiv query failed: {exc}")
+            return []
+
+        keywords_cfg = self.config.source.arxiv.get("keywords")
+        keywords = (
+            [str(k).strip().lower() for k in keywords_cfg if str(k).strip()]
+            if keywords_cfg else []
+        )
+        if keywords:
+            results = [
+                r for r in results
+                if any(kw in f"{r.title or ''} {r.summary or ''}".lower() for kw in keywords)
+            ]
+
+        # Keep only papers submitted within the window; arXiv results are already
+        # sorted desc by date, so the tail gets trimmed implicitly via the limit.
+        if results:
+            newest = results[0].published
+            from datetime import timedelta
+            cutoff = newest - timedelta(days=days)
+            results = [r for r in results if r.published >= cutoff]
+
+        if not results:
+            return []
+
+        sample_size = min(limit, len(results))
+        sampled = random.sample(results, sample_size)
+        logger.info(
+            f"Fallback retrieval: {len(sampled)} paper(s) sampled from last {days}d "
+            f"(keyword-matched pool size {len(results)})"
+        )
+        return sampled
+
     def _retrieve_raw_papers(self) -> list[ArxivResult]:
         client = arxiv.Client(num_retries=10, delay_seconds=10)
         query = '+'.join(self.config.source.arxiv.category)
@@ -157,6 +212,17 @@ class ArxivRetriever(BaseRetriever):
                 )
 
         return raw_papers
+
+    def retrieve_fallback_papers(self, days: int = 3, limit: int = 5) -> list[Paper]:
+        """Convenience wrapper: fallback raw results → Paper objects."""
+        raws = self.retrieve_recent_fallback(days=days, limit=limit)
+        papers: list[Paper] = []
+        for r in raws:
+            try:
+                papers.append(self.convert_to_paper(r))
+            except Exception as exc:
+                logger.warning(f"Skipping fallback paper {getattr(r, 'title', r)}: {exc}")
+        return papers
 
     def convert_to_paper(self, raw_paper: ArxivResult) -> Paper:
         title = raw_paper.title

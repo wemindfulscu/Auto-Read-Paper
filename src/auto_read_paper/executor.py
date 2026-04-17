@@ -90,8 +90,28 @@ class Executor:
                 )
                 top_papers.extend(filler)
 
+        # Last-resort fallback: still nothing (e.g. first run with empty history on a
+        # quiet day). Pull a few recent arXiv papers so the pipeline proves it's alive.
+        if not top_papers:
+            arxiv_retriever = self.retrievers.get("arxiv")
+            if arxiv_retriever is not None and hasattr(arxiv_retriever, "retrieve_fallback_papers"):
+                logger.info("Pool empty — fetching recent arXiv papers as heartbeat fallback")
+                try:
+                    fb = arxiv_retriever.retrieve_fallback_papers(days=3, limit=max_n)
+                except Exception as exc:
+                    logger.warning(f"Heartbeat fallback failed: {exc}")
+                    fb = []
+                if fb:
+                    # Score them so the email still shows a ranked number.
+                    logger.info(f"Scoring {len(fb)} heartbeat papers")
+                    fb = self.reranker.rerank(fb, [])
+                    fb.sort(key=lambda p: p.score or 0.0, reverse=True)
+                    top_papers = fb[:max_n]
+                    if self.history is not None:
+                        self.history.record_newly_scored(top_papers, today)
+
         if not top_papers and not self.config.executor.send_empty:
-            logger.info("No papers in pool. No email will be sent.")
+            logger.info("No papers in pool even after fallback. No email will be sent.")
             if self.history is not None:
                 self.history.save()
             return
