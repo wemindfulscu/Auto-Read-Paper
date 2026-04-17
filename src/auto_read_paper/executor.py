@@ -67,7 +67,28 @@ class Executor:
             pool = list(scored_today)
 
         pool.sort(key=lambda p: p.score or 0.0, reverse=True)
-        top_papers = pool[: self.config.executor.max_paper_num]
+        max_n = int(self.config.executor.max_paper_num)
+        top_papers = pool[:max_n]
+
+        # Fallback so the daily email is never empty: if we don't have enough
+        # unsent/fresh papers, pad with previously-sent entries from history
+        # (highest-scoring first). This guarantees the pipeline produces a
+        # visible heartbeat every day even on quiet days.
+        if len(top_papers) < max_n and self.history is not None:
+            already_ids = {getattr(p, "url", None) for p in top_papers}
+            filler_pool = [
+                p for p in self.history.sent_papers()
+                if getattr(p, "url", None) not in already_ids
+            ]
+            filler_pool.sort(key=lambda p: p.score or 0.0, reverse=True)
+            needed = max_n - len(top_papers)
+            filler = filler_pool[:needed]
+            if filler:
+                logger.info(
+                    f"Padding email with {len(filler)} previously-sent paper(s) "
+                    f"as fallback (primary pool had only {len(top_papers)})"
+                )
+                top_papers.extend(filler)
 
         if not top_papers and not self.config.executor.send_empty:
             logger.info("No papers in pool. No email will be sent.")
@@ -75,10 +96,15 @@ class Executor:
                 self.history.save()
             return
 
-        logger.info(f"Generating deep summaries for top {len(top_papers)} papers...")
-        for p in tqdm(top_papers):
-            p.generate_tldr(self.openai_client, self.config.llm)
-            p.generate_affiliations(self.openai_client, self.config.llm)
+        if top_papers:
+            logger.info(f"Generating deep summaries for top {len(top_papers)} papers...")
+            for p in tqdm(top_papers):
+                # Skip re-generating tldr for previously-rendered fillers that
+                # already have it from a past run — saves tokens.
+                if not p.tldr:
+                    p.generate_tldr(self.openai_client, self.config.llm)
+                if not p.affiliations:
+                    p.generate_affiliations(self.openai_client, self.config.llm)
 
         logger.info("Sending email...")
         email_content = render_email(top_papers)

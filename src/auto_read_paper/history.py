@@ -133,6 +133,10 @@ class ScoreHistory:
         """Reconstruct Paper objects from entries that were never sent."""
         return [_entry_to_paper(e) for e in self.entries if not e.get("sent_at")]
 
+    def sent_papers(self) -> list[Paper]:
+        """Previously-sent entries, usable as a fallback filler when the primary pool is empty."""
+        return [_entry_to_paper(e) for e in self.entries if e.get("sent_at")]
+
     def record_newly_scored(self, papers: list[Paper], today: str) -> None:
         existing = self.existing_ids()
         added = 0
