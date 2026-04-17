@@ -125,6 +125,9 @@ class Executor:
                     p.generate_tldr(self.openai_client, self.config.llm)
                 if not p.affiliations:
                     p.generate_affiliations(self.openai_client, self.config.llm)
+                lang = str(self.config.llm.get("language", "Chinese")).lower()
+                if lang != "english" and not getattr(p, "title_zh", None):
+                    p.generate_title_zh(self.openai_client, self.config.llm)
 
         logger.info("Sending email...")
         email_content = render_email(top_papers)

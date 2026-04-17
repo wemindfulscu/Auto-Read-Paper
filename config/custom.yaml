@@ -45,4 +45,6 @@ executor:
   send_empty: false
   max_paper_num: 10
   source: ['arxiv']
-  reranker: keyword_llm
+  # 'reader_reviewer' = 多智能体 (Reader 读文献 + Reviewer 全局评分，默认，token 效率高，筛选质量更好)
+  # 'keyword_llm'     = 单智能体 (逐篇 LLM 打分，简单直接)
+  reranker: reader_reviewer

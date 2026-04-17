@@ -45,4 +45,4 @@ executor:
   send_empty: false # Send the email even when nothing matched today.
   max_paper_num: 10 # Maximum papers shown in the email (Top-N).
   source: ['arxiv']
-  reranker: keyword_llm
+  reranker: reader_reviewer # Options: 'reader_reviewer' (multi-agent, default, token-efficient & higher-quality) or 'keyword_llm' (single-agent, per-paper LLM scoring).

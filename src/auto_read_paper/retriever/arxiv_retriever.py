@@ -8,10 +8,17 @@ import feedparser
 from tqdm import tqdm
 import multiprocessing
 import os
+import logging
 from queue import Empty
 from typing import Any, Callable, TypeVar
 from loguru import logger
 import requests
+
+# arXiv's HTML rendering service (arxiv.org/html/<id>) is often unavailable for
+# freshly-announced papers. trafilatura logs a noisy ERROR line per 404 that
+# isn't actionable — we already fall back to tar/PDF extraction. Mute it.
+logging.getLogger("trafilatura").setLevel(logging.CRITICAL)
+logging.getLogger("trafilatura.downloads").setLevel(logging.CRITICAL)
 
 T = TypeVar("T")
 
@@ -250,7 +257,10 @@ def extract_text_from_html(paper: ArxivResult) -> str | None:
     try:
         return _extract_text_from_html_worker(html_url)
     except Exception as exc:
-        logger.warning(f"HTML extraction failed for {paper.title}: {exc}")
+        # arXiv's HTML service is routinely unavailable for brand-new papers.
+        # Demote to DEBUG — the tar/PDF fallback will handle extraction and
+        # users don't need to see a WARNING for expected behavior.
+        logger.debug(f"HTML extraction unavailable for {paper.title}: {exc}")
         return None
 
 

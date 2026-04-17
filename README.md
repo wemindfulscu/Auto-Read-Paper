@@ -3,40 +3,95 @@
  <img width=200px height=200px src="assets/logo.svg" alt="logo"></a>
 </p>
 
-<h3 align="center">Auto-Read-Paper</h3>
+<h1 align="center">📚 Auto-Read-Paper</h1>
 
 <div align="center">
 
   [![Status](https://img.shields.io/badge/status-active-success.svg)]()
+  [![Platform](https://img.shields.io/badge/runs%20on-GitHub%20Actions-blue)]()
+  [![Cost](https://img.shields.io/badge/infra%20cost-%240-success)]()
+  [![Language](https://img.shields.io/badge/digest-中文%20AI%20解读-red)]()
 
 </div>
 
 ---
 
-<p align="center">Fetch fresh arXiv papers every day, let an LLM read and rank them by relevance and core value, and email you a digest of the most valuable ones — fully automated on GitHub Actions.
-    <br>
+<p align="center">
+<b>Your personal AI paper-reading assistant</b> — automatically fetches fresh arXiv papers daily, runs a <b>multi-agent read-and-review pipeline</b>, remembers unsent high-scoring papers across days, and delivers a <b>bilingual digest with AI commentary</b> straight to your inbox.<br>
+Runs entirely on GitHub Actions — <b>zero server, zero cost</b>.
 </p>
 
-## 🧐 About
+<p align="center"><a href="#-highlights">🌟 Highlights</a> · <a href="#-usage">🚀 Usage</a> · <a href="#-how-it-works">📖 How it works</a></p>
 
-*Auto-Read-Paper* pulls newly-announced arXiv papers every day, filters by your keywords, has an LLM rate each on **innovation / relevance / potential**, then writes a structured Chinese AI summary for the top-N, and mails the result to your inbox. Runs on GitHub Actions with **zero infrastructure cost**.
+---
 
-No reading list, no local machine, no Zotero. Just keywords.
+## 🌟 Highlights
 
-## ✨ Features
+> Not just a paper crawler — an AI that **reads, grades, picks, summarizes, and remembers** for you.
 
-- **Fully automated** — daily cron on GitHub Actions, no server needed.
-- **Beijing-time schedule** — set a single repo variable `SEND_HOUR_BJ` (0-23); the email lands at that Beijing hour every day.
-- **Keyword-driven** — papers not matching your keywords are dropped before any LLM call (saves tokens).
-- **LLM-graded ranking** — each candidate rated on innovation / relevance / potential (0-10 each), ranked by weighted composite.
-- **Chinese structured summary** — each paper in the email gets a three-section AI breakdown: 核心工作 / 主要创新 / 潜在价值.
-- **HTML email delivery** — clean paper cards with score, authors, affiliations, PDF link (same layout as upstream zotero-arxiv-daily).
-- **Full-text aware** — extracts TeX / HTML / PDF to feed the LLM, not just the abstract.
-- **Rolling 7-day pool** — unsent high-scoring papers carry over: if today's crop is weak, yesterday's runner-up gets its turn. State persisted in `state/score_history.json`.
+### 🤖 Multi-Agent Collaboration (core feature)
 
-## 📷 Screenshot
+Unlike the common "score each paper in isolation" approach, Auto-Read-Paper ships with a **Reader + Reviewer two-agent pipeline** by default:
+
+| Role | Responsibility | Output |
+|---|---|---|
+| 🧑‍🔬 **Reader** | Reads each paper's title, abstract, and a preview of the main body; extracts structured notes (task / method / contributions / results / limitations) | Compact JSON notes per paper |
+| 🧐 **Reviewer** | Receives all Reader notes in a single batch, ranks papers globally on **innovation / relevance / impact**, produces a 0-10 score | Globally consistent ranking + scores |
+
+**Why is this better than a single agent?**
+- ✅ **Global calibration** — the Reviewer sees every candidate side-by-side, so scores don't drift the way they do when each paper is graded in isolation.
+- ✅ **Token-efficient** — Reader does a light read per paper; Reviewer does one batched call. Far cheaper than per-paper scoring.
+- ✅ **Sharper ranking** — structured notes let the grader focus on real technical differentiation instead of abstract wording.
+
+💡 You can toggle single/multi-agent mode anytime in YAML: `executor.reranker: reader_reviewer` (default, multi-agent) or `keyword_llm` (single-agent, per-paper scoring).
+
+### 📖 Automatic deep-reading & localized AI commentary
+
+Each Top-N paper is **deep-read** — the full TeX / HTML / PDF is pulled and fed to the LLM to produce a structured summary in the language you configured (`llm.language` in YAML, default `Chinese`):
+
+- 🎯 **Core work** — 1-2 sentences on the problem and approach
+- 💡 **Key innovation** — 1-2 sentences on the key technical contribution
+- 🚀 **Potential value** — 1-2 sentences on real-world impact and research value
+
+🔤 **Acronym-friendly**: widely-used technical abbreviations (RL, MPC, RAG, LVLM, GRPO, …) are preserved in the original English, with a brief gloss in the target language on first use — so domain readers never lose context.
+
+### 🧠 Long-term memory · 7-day rolling digest
+
+High-scoring papers are **never buried**:
+
+- 📥 Papers scored today but not sent → roll forward into the candidate pool
+- 🔄 They re-compete tomorrow: on a quiet day, yesterday's "4th place" gets its turn
+- 💾 State persists in `state/score_history.json`, auto-committed back to the repo after each run
+- ⏰ Entries older than `retention_days` (default 7) are pruned to prevent backlog
+
+**Result:** the daily email is never empty, and genuinely valuable papers always end up in front of you — eventually.
+
+### 📧 Carefully designed email cards
+
+- 📑 **Bilingual titles (auto)** — English original on top, plus a translation into `llm.language` underneath (smaller, subtle). When `llm.language` is set to `English`, the title stays single-line English only — no redundant translation.
+- 🏷️ **Color-coded section pills** — the three summary sections are tagged in blue / green / orange
+- ⭐ **Relevance score badge** — AI score visible at a glance
+- 🎨 **Card layout** — accented left border, rounded corners, soft shadows; looks clean on both mobile and desktop
 
 ![screenshot](./assets/screenshot.png)
+
+---
+
+## ✨ Full feature list
+
+- 🤖 **Single/multi-agent switchable** — multi-agent by default (Reader + Reviewer): token-efficient with global scoring
+- 🧠 **7-day long-term memory** — rolling candidate pool ensures high-scoring papers aren't lost
+- 📖 **Automatic full-text reading** — pulls TeX/HTML/PDF, not just abstracts
+- 🌐 **Localized AI commentary** — three-section structured summary in the language you choose (`llm.language`); technical acronyms preserved
+- 📑 **Smart bilingual titles** — English + translation in `llm.language`; automatically collapses to single-line English when language is set to English
+- 🎨 **Beautiful email template** — colored tags, card layout, score badges
+- ⏰ **Beijing-time schedule** — a single repo variable `SEND_HOUR_BJ` controls send time
+- 🔍 **Keyword pre-filter** — papers not matching your keywords are dropped before any LLM call (saves tokens)
+- 💰 **Zero infrastructure cost** — runs entirely on free GitHub Actions minutes
+- 🔁 **Never-empty email** — history fallback + arXiv heartbeat keeps the daily pulse alive
+- 🔧 **Hydra + OmegaConf** — every behavior is configurable via YAML with hot env-var interpolation
+
+---
 
 ## 🚀 Usage
 
@@ -126,7 +181,9 @@ No reading list, no local machine, no Zotero. Just keywords.
      send_empty: false
      max_paper_num: 10                     # Top-N papers shown in the email
      source: ['arxiv']
-     reranker: keyword_llm
+     # reader_reviewer = 多智能体 (Reader + Reviewer, 默认, 推荐)
+     # keyword_llm     = 单智能体 (逐篇 LLM 打分)
+     reranker: reader_reviewer
    ```
 
    > `${oc.env:XXX,yyy}` resolves to environment variable `XXX`, falling back to `yyy` when unset.
@@ -161,17 +218,28 @@ DEBUG=true uv run src/auto_read_paper/main.py
 
 ## 📖 How it works
 
-1. **Retrieve** — arXiv RSS feed gives today's newly-announced papers in the configured categories.
-2. **Keyword pre-filter** — papers whose title or abstract doesn't mention any of your keywords are dropped (saves LLM cost).
-3. **LLM scoring** — each surviving paper is rated on innovation / relevance / potential (0-10 each) and ranked by the weighted composite.
-4. **Deep read** — top-N papers are fed (title + abstract + extracted full text) back to the LLM to produce a structured Chinese summary: 核心工作 / 主要创新 / 潜在价值.
-5. **Email** — rendered as an HTML message via SMTP.
+```
+arXiv RSS → keyword filter → multi-agent rerank → history merge → Top-N deep read → email
+                                      ↓
+                      Reader (structured notes) + Reviewer (global scoring)
+```
+
+1. **Retrieve** — pull newly-announced papers in the configured categories from arXiv RSS every day
+2. **Keyword pre-filter** — drop papers whose title/abstract doesn't match any keyword (before any LLM call)
+3. **Multi-agent rerank (default)** —
+   - 🧑‍🔬 **Reader**: reads title + abstract + main-body preview per paper, emits structured JSON notes
+   - 🧐 **Reviewer**: compares all candidates side-by-side in a single call and scores each 0-10 on innovation / relevance / impact
+4. **History merge** — today's scored papers merge with the past-7-days unsent pool; everything is re-sorted by score
+5. **Deep read** — the Top-N go back to the LLM to produce the three-section summary (in the language set via `llm.language`) and, when that language differs from English, a translated title
+6. **Render & send** — HTML template renders colored cards and sends via SMTP; papers are only marked as sent **after** SMTP succeeds
 
 ## 📌 Limitations
 
 - arXiv RSS is the only source. Google Scholar has no stable API and would not survive on GitHub Actions runners.
 - The LLM scoring is only as good as the prompt + model; for niche domains, expect some noise. Raise `max_paper_num` or tune `weights` to taste.
 - GitHub Actions has a per-repo quota (6 h/run, 2000 min/month for private repos). The 5-minute schedule wakeup is **free for public repos**, but adds up for private ones (~8600 invocations/month, mostly skipping in <30s). Switch the cron to `'*/15 * * * *'` or `'5 * * * *'` if you fork it private.
+
+---
 
 ## 📃 License
 
