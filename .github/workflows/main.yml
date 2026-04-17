@@ -46,7 +46,12 @@ jobs:
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
-          printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
-          echo "Use custom config: "
+          if [ -n "$CUSTOM_CONFIG" ]; then
+            printf "%b\n" "$CUSTOM_CONFIG" > config/custom.yaml
+            echo "Wrote config/custom.yaml from CUSTOM_CONFIG repo variable."
+          else
+            echo "::warning::CUSTOM_CONFIG repo variable is empty — falling back to repo's config/custom.yaml."
+          fi
+          echo "Effective config/custom.yaml:"
           cat config/custom.yaml
           uv run src/auto_read_paper/main.py
