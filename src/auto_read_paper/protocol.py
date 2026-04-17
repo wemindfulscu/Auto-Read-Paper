@@ -38,9 +38,10 @@ def _clean_tldr(raw: str) -> str:
 
     text = text[core_idx:]
 
-    # Trim any trailing noise after the 潜在价值 section. Cut at common "end of
-    # answer" markers the model might append.
-    for marker in ("\n\n---", "\n---", "\n\n##", "\n总结", "\nSummary"):
+    # Trim any trailing noise after the 潜在价值 section. Only match standalone
+    # markdown/section markers — avoid generic words like "总结" that could legitimately
+    # appear mid-sentence and prematurely truncate 主要创新 / 潜在价值.
+    for marker in ("\n\n---", "\n\n##", "\n\n###"):
         cut = text.find(marker)
         if cut != -1:
             text = text[:cut]
@@ -105,12 +106,12 @@ class Paper:
             f"重要要求：\n"
             f"1. 必须使用中文撰写。涉及专业英文缩写时（如 RL、MPC、RAG、LVLM、GRPO、LLM 等），"
             f"保留英文缩写，但首次出现时用括号中文解释一次（例如：RL（强化学习））。\n"
-            f"2. 每一段 1-2 句话，精炼直接，不要复述摘要原文。\n"
-            f"3. 只输出三段结构化内容，不要任何前言、思考过程、格式说明或结束语。\n\n"
-            f"必须严格使用如下三个中文小节标签（不要增删）：\n"
-            f"【核心工作】<用 1-2 句中文描述论文的问题与方法>\n"
-            f"【主要创新】<用 1-2 句中文描述关键技术贡献或新颖思想>\n"
-            f"【潜在价值】<用 1-2 句中文描述实际影响、应用或研究价值>\n\n"
+            f"2. 必须完整输出下方全部三个小节，缺一不可；每个小节标签必须单独出现且严格一致。\n"
+            f"3. 不要复述摘要原文；不要任何前言、思考过程、格式说明或结束语；直接以【核心工作】开头。\n\n"
+            f"必须严格使用如下三个中文小节标签，按顺序依次出现：\n"
+            f"【核心工作】<用 1-2 句中文描述论文研究的问题、方法与所处任务场景>\n"
+            f"【主要创新】<用 2-3 句中文详细描述关键技术贡献与新颖点：它解决了什么痛点、核心思想是什么、相比已有工作的差异或优势>\n"
+            f"【潜在价值】<用 1-2 句中文描述实际影响、可能的应用场景或后续研究价值>\n\n"
         )
         if self.title:
             prompt += f"Title:\n {self.title}\n\n"
@@ -139,8 +140,10 @@ class Paper:
                         "你是一名资深 AI 研究者，负责为忙碌的读者总结科研论文。"
                         "必须使用中文撰写全部内容；只有在涉及已广泛使用的英文缩写（如 RL、MPC、RAG、LLM 等）时"
                         "才可保留英文，且首次出现需用括号中文解释一次。"
-                        "严格遵循三段结构，不要输出任何思考过程、前言、方案说明或结束语；"
-                        "不要英文句子，不要复述摘要原文；直接以【核心工作】开头。"
+                        "必须严格依次输出【核心工作】【主要创新】【潜在价值】三个小节，每个小节缺一不可，标签必须完整保留、拼写一致。"
+                        "【主要创新】需要写 2-3 句、偏详细：说明解决了什么痛点、核心方法的思想、相比已有工作的差异或优势。"
+                        "【核心工作】与【潜在价值】各 1-2 句。"
+                        "不要输出任何思考过程、前言、方案说明或结束语；不要英文句子；不要复述摘要原文；直接以【核心工作】开头。"
                     ),
                 },
                 {"role": "user", "content": prompt},
