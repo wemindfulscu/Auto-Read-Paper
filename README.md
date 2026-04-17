@@ -68,6 +68,7 @@ No reading list, no local machine, no Zotero. Just keywords.
    | Variable | Description | Example |
    | :--- | :--- | :--- |
    | `SEND_HOUR_BJ` | Beijing hour (0-23) at which the daily email is sent. Default `7`. | `7` |
+   | `SEND_MINUTE_BJ` | Beijing minute (0-59). Optional, default `0`. Rounded down to the nearest 5-minute bucket — GitHub cron drifts ~5-15 min so finer precision isn't realistic. | `30` |
    | `OPENAI_MODEL` | LLM model id used for both scoring and the deep-read summary. Any model your `OPENAI_API_BASE` provider serves. Default `gpt-4o-mini`. | `gpt-4o-mini`, `deepseek-chat`, `Qwen/Qwen2.5-72B-Instruct` |
    | `CUSTOM_CONFIG` | The full YAML configuration (see below). | *(multi-line YAML)* |
 
@@ -113,7 +114,7 @@ No reading list, no local machine, no Zotero. Just keywords.
 4. **Trigger the workflow manually to test it.**
    ![test](./assets/test.png)
 
-   Check the workflow log and your inbox. After the test, the workflow also runs automatically — the job wakes up every hour, but only sends an email when the **Beijing hour equals `SEND_HOUR_BJ`** (default 07:00 Beijing time). Change the variable anytime to reschedule; no YAML edit needed.
+   Check the workflow log and your inbox. After the test, the workflow also runs automatically — the job wakes up every 5 minutes, but only sends an email when the **Beijing time matches `SEND_HOUR_BJ`:`SEND_MINUTE_BJ`** (default 07:00 Beijing time, rounded down to a 5-minute bucket). Change the variables anytime to reschedule; no YAML edit needed.
 
 ### Full configuration reference
 
@@ -147,7 +148,7 @@ DEBUG=true uv run src/auto_read_paper/main.py
 
 - arXiv RSS is the only source. Google Scholar has no stable API and would not survive on GitHub Actions runners.
 - The LLM scoring is only as good as the prompt + model; for niche domains, expect some noise. Raise `max_paper_num` or tune `weights` to taste.
-- GitHub Actions has a per-repo quota (6 h/run, 2000 min/month for private repos). Hourly wake-ups + one real daily run comfortably fit for public repos.
+- GitHub Actions has a per-repo quota (6 h/run, 2000 min/month for private repos). The 5-minute schedule wakeup is **free for public repos**, but adds up for private ones (~8600 invocations/month, mostly skipping in <30s). Switch the cron to `'*/15 * * * *'` or `'5 * * * *'` if you fork it private.
 
 ## 📃 License
 

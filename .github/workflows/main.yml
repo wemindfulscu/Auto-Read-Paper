@@ -2,9 +2,10 @@ name: Send paper digest daily
 on:
   workflow_dispatch:
   schedule:
-    # Runs hourly. The job checks SEND_HOUR_BJ (Beijing hour, 0-23, default 7)
-    # and skips unless the current Beijing hour matches — so only one real run per day.
-    - cron: '5 * * * *'
+    # Runs every 5 minutes. The job checks SEND_HOUR_BJ + SEND_MINUTE_BJ (Beijing time)
+    # and skips unless the current Beijing time falls in the same 5-minute bucket as the target.
+    # GitHub Actions cron drift is ~5-15 min, so 5-minute precision is the practical floor.
+    - cron: '*/5 * * * *'
 
 jobs:
   send-digest:
@@ -14,17 +15,22 @@ jobs:
         id: schedule_check
         env:
           SEND_HOUR_BJ: ${{ vars.SEND_HOUR_BJ }}
+          SEND_MINUTE_BJ: ${{ vars.SEND_MINUTE_BJ }}
         run: |
           target_hour="${SEND_HOUR_BJ:-7}"
+          target_minute="${SEND_MINUTE_BJ:-0}"
           current_bj_hour=$(TZ=Asia/Shanghai date +%-H)
-          echo "Beijing hour now = $current_bj_hour, target = $target_hour, trigger = ${{ github.event_name }}"
+          current_bj_minute=$(TZ=Asia/Shanghai date +%-M)
+          target_bucket=$(( target_minute / 5 * 5 ))
+          current_bucket=$(( current_bj_minute / 5 * 5 ))
+          echo "Beijing time now = ${current_bj_hour}:$(printf '%02d' "$current_bj_minute"), target = ${target_hour}:$(printf '%02d' "$target_minute") (bucket ${target_bucket}), trigger = ${{ github.event_name }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$current_bj_hour" = "$target_hour" ]; then
+          elif [ "$current_bj_hour" = "$target_hour" ] && [ "$current_bucket" = "$target_bucket" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping — Beijing hour $current_bj_hour != $target_hour"
+            echo "::notice::Skipping — Beijing ${current_bj_hour}:$(printf '%02d' "$current_bj_minute") not in target bucket ${target_hour}:$(printf '%02d' "$target_bucket")"
           fi
 
       - name: Checkout
