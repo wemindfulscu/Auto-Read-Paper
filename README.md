@@ -247,33 +247,7 @@ This is the schedule. The repo deliberately ships **no** `schedule:` cron (GitHu
 
 <br>
 
-**6.2 &nbsp; Generate a GitHub Personal Access Token (PAT).**
-
-Navigate: **GitHub avatar (top-right)** → **Settings** → **Developer settings** (left-sidebar bottom) → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**.
-
-> ⚠ **"Developer settings" lives under your *account* Settings, NOT the repo's Settings.** If you only see "Deploy keys / Secrets / Actions", you're in the wrong Settings page — go back and click the avatar in the top-right first.
-
-![developer settings](./assets/Developer_settings.png)
-
-![fine-grained tokens](./assets/Fine-grained_tokens.png)
-
-Fill the token form **exactly** like the table below — the screenshot shows a configuration with **one critical mistake flagged in red**:
-
-![no expiration](./assets/NoExpiration.png)
-
-| Field | Correct value | ⚠ Mistake to avoid |
-| :--- | :--- | :--- |
-| **Token name** | Anything, e.g. `Auto-Read-Paper dispatcher` | — |
-| **Expiration** | *No expiration* (recommended) or 1 year with a calendar reminder to rotate | — |
-| **Repository access** | **Only select repositories** → pick **only your fork** of `Auto-Read-Paper` | **❌ Do NOT pick "Public repositories"** — that grants read-only access to every public repo and **cannot dispatch workflows**. The cron POST will fail with `403 Resource not accessible`. |
-| **Repository permissions → Actions** | **Read and write** | Leave all other permissions on *No access*. |
-| **Account permissions** | *No access* (skip this whole section) | — |
-
-Click **Generate token** → copy the `github_pat_...` string **now**. GitHub shows it exactly once; losing it means regenerating.
-
-<br>
-
-**6.3 &nbsp; Create the cron job.**
+**6.2 &nbsp; Create the cron job.**
 
 On the cron-job.org dashboard click **CREATE CRONJOB**.
 
@@ -281,7 +255,7 @@ On the cron-job.org dashboard click **CREATE CRONJOB**.
 
 <br>
 
-**6.4 &nbsp; Fill in the "Common" tab** (screenshot below is the target state):
+**6.3 &nbsp; Fill in the "Common" tab** (screenshot below is the target state):
 
 ![cron config](./assets/cron_config.png)
 
@@ -295,24 +269,70 @@ On the cron-job.org dashboard click **CREATE CRONJOB**.
 
 <br>
 
-**6.5 &nbsp; Switch to the "Advanced" tab** and fill the HTTP details. The screenshot below shows a configuration with **three critical mistakes flagged in red** — your values must differ from the screenshot exactly as the table says.
+**6.4 &nbsp; Switch to the "Advanced" tab** and fill the HTTP details (**except** the Authorization token value — we'll get that in the next step):
 
 ![cron advanced](./assets/cron_advanced.png)
 
-| Field | Correct value | ⚠ Mistake to avoid |
-| :--- | :--- | :--- |
-| **Request method** | `POST` | — |
-| **Header 1 → Key** | `Authorization` | — |
-| **Header 1 → Value** | `Bearer <paste your github_pat_... token here>` | **❌ Do NOT paste just the token** — the word **`Bearer `** (with a trailing space) must come **before** the token. GitHub returns `401 Unauthorized` otherwise. |
-| **Header 2 → Key** | `Accept` | — |
-| **Header 2 → Value** | `application/vnd.github+json` | — |
-| **Request body** | `{"ref":"main"}` | **❌ Do NOT leave the body empty** — without it GitHub returns `422 Unprocessable Entity` (no `ref` specified). Do **not** add `"inputs":{"force":true}` either; that would bypass the already-sent-today guard. |
+| Field | Value |
+| :--- | :--- |
+| **Request method** | `POST` |
+| **Header 1 → Key** | `Accept` |
+| **Header 1 → Value** | `application/vnd.github+json` |
+| **Header 2 → Key** | `Authorization` |
+| **Header 2 → Value** | ⏳ **Leave blank for now.** You'll paste `Bearer <token>` here in step 6.6. |
+| **Request body** | `{"ref":"main"}` <br> ⚠ Do **not** leave the body empty — GitHub returns `422 Unprocessable Entity` without it. Do **not** add `"inputs":{"force":true}` either; that would bypass the already-sent-today guard. |
+
+> ⚠ **DO NOT close or navigate away from this cron-job.org tab.** In the next step you'll open GitHub in a **new browser tab** to generate the PAT, then come back to this exact form to paste the token. If you close this tab, all values above are lost.
 
 <br>
 
-**6.6 &nbsp; Click *Create* at the bottom.** Done — the job appears on your dashboard with *enabled cronjobs: 1*. The cron-job.org dashboard is now the single source of truth for your send time; to reschedule, edit the job there, no repo edit needed.
+**6.5 &nbsp; Open a NEW browser tab → generate a GitHub Personal Access Token (PAT).**
 
-> **Verify it works:** open the job's detail page → click **Test run** (or *Execute now*). Within a few seconds the response panel shows the HTTP status. Expected: `204 No Content`. Then open your GitHub repo's **Actions** tab — a new `Send paper daily` run should appear within ~10 s.
+> 🟠 **Keep the cron-job.org tab open in the background** — open GitHub in a separate tab (Ctrl-click the link, or right-click → *Open in new tab*).
+
+Navigate: **GitHub avatar (top-right)** → **Settings** → **Developer settings** (left sidebar, bottom) → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**.
+
+> ⚠ **"Developer settings" lives under your *account* Settings, NOT the repo's Settings.** If you only see *Deploy keys / Secrets / Actions*, you're in the wrong Settings page — click your avatar in the top-right first.
+
+![developer settings](./assets/Developer_settings.png)
+
+![fine-grained tokens](./assets/Fine-grained_tokens.png)
+
+Fill the token form to match the screenshot exactly — every red-arrow field matters:
+
+![no expiration](./assets/NoExpiration.png)
+
+| Field | Value | Notes |
+| :--- | :--- | :--- |
+| **Token name** | `Auto-Read-Paper` (or anything descriptive) | — |
+| **Resource owner** | Yourself (your own username) | — |
+| **Expiration** | *No expiration* (recommended) or 1 year with a calendar reminder to rotate | A 90-day default will silently break the cron after 3 months. |
+| **Repository access** | **Only select repositories** → click **Select repositories** → pick **only your fork** of `Auto-Read-Paper` | ❌ Do **not** pick *Public repositories* (read-only, cannot dispatch → 403) or *All repositories* (over-privileged). |
+| **Repository permissions → Actions** | **Read and write** | **Click "+ Add permissions"** to reveal the Actions row, then set its dropdown to *Read and write*. This is the most commonly-missed step → symptom is `403 Forbidden`. |
+| **Repository permissions → Metadata** | *Read-only* (auto-set, required) | GitHub adds this automatically — you cannot turn it off. |
+| **Account permissions** | Leave all on *No access* | — |
+
+Click **Generate token** at the bottom → copy the `github_pat_...` string **immediately**. GitHub shows it exactly once; losing it means generating a new one.
+
+<br>
+
+**6.6 &nbsp; Switch back to the cron-job.org tab → paste the token.**
+
+In the **Authorization Value** field you left blank in step 6.4, paste:
+
+```
+Bearer <your github_pat_... token>
+```
+
+⚠ The word **`Bearer `** (with a trailing space) **must** come before the token — without it GitHub returns `401 Unauthorized`. Example: `Bearer github_pat_11ABCDEF...xyz` (whole line goes into the Value box).
+
+Click **Create** at the bottom of the page. Done — the job appears on your dashboard with *enabled cronjobs: 1*.
+
+<br>
+
+**6.7 &nbsp; Verify it works.**
+
+On the job's detail page click **Test run** (or *Execute now*). Within a few seconds the response panel shows the HTTP status. Expected: `204 No Content`. Then open your GitHub repo's **Actions** tab — a new `Send paper daily` run should appear within ~10 s.
 
 **Troubleshooting the test-run HTTP status:**
 
