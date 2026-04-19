@@ -33,8 +33,22 @@ jobs:
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
           export DEBUG=true
+          # Promote OPENAI_* → LLM_* so GitHub Actions' empty-string-for-
+          # missing-secret semantics don't break OmegaConf fallback chains.
+          # See main.yml for the detailed explanation.
+          promote() {
+            local new="$1" old="$2"
+            if [ -z "${!new:-}" ] && [ -n "${!old:-}" ]; then
+              export "$new=${!old}"
+            fi
+          }
+          promote LLM_API_KEY    OPENAI_API_KEY
+          promote LLM_API_BASE   OPENAI_API_BASE
+          promote LLM_MODEL      OPENAI_MODEL
+          promote LLM_MAX_TOKENS OPENAI_MAX_TOKENS
+
           if [ -n "$CUSTOM_CONFIG" ]; then
-            # C1 fix: sanitize before writing (rejects ${...} interpolations).
+            # C1 fix: sanitize before writing (rejects unsafe ${...} interpolations).
             uv run --with pyyaml python scripts/sanitize_custom_config.py config/custom.yaml <<< "$CUSTOM_CONFIG"
           else
             echo "::warning::CUSTOM_CONFIG repo variable is empty — falling back to repo's config/custom.yaml (neutral: will fail loudly)."

@@ -17,6 +17,7 @@ dependencies = [
     "loguru>=0.7.3",
     "openai>=2.24.0,<3",
     "litellm>=1.55,<2",
+    "tenacity>=8.0",
     "arxiv>=2.4.0",
     "pymupdf4llm>=0.3.4",
     "pymupdf-layout>=1.27.1",
