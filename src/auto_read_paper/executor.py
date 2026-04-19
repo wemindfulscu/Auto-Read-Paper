@@ -8,7 +8,7 @@ from .reranker import get_reranker_cls
 from .construct_email import render_email
 from .utils import send_email
 from .history import ScoreHistory, _today_iso
-from openai import OpenAI
+from .llm_client import LLMClient
 from tqdm import tqdm
 
 
@@ -19,7 +19,7 @@ class Executor:
             source: get_retriever_cls(source)(config) for source in config.executor.source
         }
         self.reranker = get_reranker_cls(config.executor.reranker)(config)
-        self.openai_client = OpenAI(api_key=config.llm.api.key, base_url=config.llm.api.base_url)
+        self.llm = LLMClient.from_config(config.llm)
 
         hist_cfg = config.get("history") if hasattr(config, "get") else None
         self.history: ScoreHistory | None = None
@@ -80,7 +80,7 @@ class Executor:
             pool = list(scored_today)
 
         pool.sort(key=lambda p: p.score or 0.0, reverse=True)
-        max_n = int(self.config.executor.max_paper_num)
+        max_n = max(0, int(self.config.executor.max_paper_num))
         top_papers = pool[:max_n]
 
         # Fallback so the daily email is never empty: if we don't have enough
@@ -131,16 +131,16 @@ class Executor:
 
         if top_papers:
             logger.info(f"Generating deep summaries for top {len(top_papers)} papers...")
+            lang = str(self.config.llm.get("language", "Chinese"))
             for p in tqdm(top_papers):
                 # Skip re-generating tldr for previously-rendered fillers that
                 # already have it from a past run — saves tokens.
                 if not p.tldr:
-                    p.generate_tldr(self.openai_client, self.config.llm)
+                    p.generate_tldr(self.llm, lang)
                 if not p.affiliations:
-                    p.generate_affiliations(self.openai_client, self.config.llm)
-                lang = str(self.config.llm.get("language", "Chinese")).lower()
-                if lang != "english" and not getattr(p, "title_zh", None):
-                    p.generate_title_zh(self.openai_client, self.config.llm)
+                    p.generate_affiliations(self.llm)
+                if lang.lower() != "english" and not getattr(p, "title_zh", None):
+                    p.generate_title_zh(self.llm, lang)
 
         lang = str(self.config.llm.get("language", "Chinese"))
         email_content = render_email(top_papers, lang)

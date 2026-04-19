@@ -44,13 +44,27 @@ The app follows a linear pipeline orchestrated by `Executor` (`src/auto_read_pap
 
 **Rerankers** (`src/auto_read_paper/reranker/`): Register via `@register_reranker` decorator, discovered by `get_reranker_cls()`. Two implementations: `keyword_llm` (per-paper LLM scoring) and `reader_reviewer` (two-agent pipeline, default).
 
+### LLM Gateway
+
+All LLM traffic goes through `LLMClient` in [src/auto_read_paper/llm_client.py](src/auto_read_paper/llm_client.py), a thin wrapper around LiteLLM. Never call `openai.OpenAI` or `litellm.completion` directly from feature code. The client handles:
+
+- Provider routing via LiteLLM model prefixes (`openai/`, `anthropic/`, `gemini/`, `deepseek/`, `ollama/`, `openrouter/`, ...).
+- Reasoning-model param translation (o1 / o3 / o4 / gpt-5: `max_tokens` → `max_completion_tokens`, drop `temperature` / `top_p`).
+- `response_format={"type":"json_object"}` only when the provider whitelist supports it.
+- Balanced-brace JSON extraction in `complete_json` that survives markdown fences, `<think>` blocks, single-quote Python-style dicts, and prose preambles.
+- Default `timeout=60`, `num_retries=3`.
+
+Construct one `LLMClient` per consumer via `LLMClient.from_config(config.llm)` and reuse it.
+
 ### Configuration
 
 Uses Hydra + OmegaConf. Config is composed from `config/base.yaml` (defaults) + `config/custom.yaml` (user overrides). Environment variables are interpolated via `${oc.env:VAR_NAME,default}` syntax. Entry point uses `@hydra.main`.
 
+Public env vars are `LLM_API_KEY` / `LLM_API_BASE` / `LLM_MODEL` / `LLM_MAX_TOKENS`. The legacy `OPENAI_*` names are honored as a deprecation-shim fallback so pre-rename forks keep running — use of the legacy name emits a workflow `::warning::` and a `loguru` warning. The legacy nested `llm.generation_kwargs.{model,max_tokens,...}` block is similarly accepted with a deprecation warning. When renaming any user-facing env var or config key in the future, follow the same two-speed policy (hard rename internals, compat shim public names).
+
 ### Data Classes
 
-`Paper` in `src/auto_read_paper/protocol.py`. `Paper` has LLM-powered methods (`generate_tldr`, `generate_title_zh`, `generate_affiliations`) that call the OpenAI API directly.
+`Paper` in [src/auto_read_paper/protocol.py](src/auto_read_paper/protocol.py). `Paper.generate_tldr` / `generate_title_zh` / `generate_affiliations` take an `LLMClient` instance — they do not talk to any provider SDK directly.
 
 ## Testing
 

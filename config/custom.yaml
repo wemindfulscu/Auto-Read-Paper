@@ -14,12 +14,13 @@ email:
 
 llm:
   api:
-    key: ${oc.env:OPENAI_API_KEY}
-    base_url: ${oc.env:OPENAI_API_BASE}
-  generation_kwargs:
-    model: ${oc.env:OPENAI_MODEL,gpt-4o-mini}
-    max_tokens: ${oc.decode:${oc.env:OPENAI_MAX_TOKENS,4096}}
-    temperature: 0.3
+    key: ${oc.env:LLM_API_KEY,${oc.env:OPENAI_API_KEY}}
+    base_url: ${oc.env:LLM_API_BASE,${oc.env:OPENAI_API_BASE}}
+  model: ${oc.env:LLM_MODEL,${oc.env:OPENAI_MODEL,gpt-4o-mini}}
+  max_tokens: ${oc.env:LLM_MAX_TOKENS,${oc.env:OPENAI_MAX_TOKENS,4096}}
+  temperature: 0.3
+  timeout: 60
+  max_retries: 3
   language: Chinese
 
 executor:

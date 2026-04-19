@@ -19,6 +19,11 @@ import pymupdf4llm  # noqa: E402
 
 _TOKEN_RE = re.compile(r'[a-zA-Z0-9]+')
 
+# M3: hard cap how much we read out of any one tar member. 5 MB covers any
+# reasonable .tex source; anything larger is either a repacked repo or an
+# adversarial archive and should be truncated rather than loaded whole.
+MAX_TAR_MEMBER_BYTES = 5 * 1024 * 1024
+
 def _tokenize(text: str) -> list[str]:
     return [t.lower() for t in _TOKEN_RE.findall(text)]
 
@@ -91,7 +96,7 @@ def extract_tex_code_from_tar(file_path:str, paper_id:str, paper_title:str | Non
     doc_block_candidates: list[str] = []
     for t in tex_files:
         f = tar.extractfile(t)
-        content = f.read().decode('utf-8',errors='ignore')
+        content = f.read(MAX_TAR_MEMBER_BYTES).decode('utf-8',errors='ignore')
         content = re.sub(r'%.*\n', '\n', content)
         content = re.sub(r'\\begin{comment}.*?\\end{comment}', '', content, flags=re.DOTALL)
         content = re.sub(r'\\iffalse.*?\\fi', '', content, flags=re.DOTALL)
@@ -146,6 +151,12 @@ def send_email(config: DictConfig, html: str, content_hash: str | None = None):
     smtp_server = config.email.smtp_server
     smtp_port = int(config.email.smtp_port)
 
+    # M1: reject CRLF in addresses to prevent SMTP header injection. parseaddr
+    # + Header.encode() don't strip these on their own.
+    for label, value in (("sender", sender), ("receiver", receiver), ("smtp_server", smtp_server)):
+        if not isinstance(value, str) or "\r" in value or "\n" in value:
+            raise ValueError(f"{label} contains illegal CR/LF characters: {value!r}")
+
     def _format_addr(s):
         name, addr = parseaddr(s)
         return formataddr((Header(name, 'utf-8').encode(), addr))
@@ -177,11 +188,19 @@ def send_email(config: DictConfig, html: str, content_hash: str | None = None):
         server = smtplib.SMTP(smtp_server, smtp_port)
         try:
             server.starttls()
-        except smtplib.SMTPNotSupportedError:
-            logger.warning(
-                f"SMTP server {smtp_server}:{smtp_port} does not support STARTTLS; "
-                f"continuing on plaintext (credentials will be transmitted in clear)."
-            )
+        except smtplib.SMTPNotSupportedError as exc:
+            # C2: never fall through to plaintext auth — that would leak the
+            # SMTP password on the wire. Abort the send; the next scheduled
+            # run will try again.
+            try:
+                server.quit()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"STARTTLS unavailable on {smtp_server}:{smtp_port}; refusing to "
+                f"send SMTP credentials in cleartext. Use an SSL/TLS port (e.g. 465) "
+                f"or a server that supports STARTTLS."
+            ) from exc
 
     try:
         server.login(sender, password)

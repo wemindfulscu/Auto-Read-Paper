@@ -129,8 +129,8 @@ Click **Fork** on the upstream repo, pick your account as the owner, keep the de
    | `SENDER` | **The email account that SENDS the digest** (outbox). Needs SMTP access — usually the same as your login email. | `abc@qq.com` |
    | `SENDER_PASSWORD` | **SMTP auth code for `SENDER`** — a special password issued by the email provider for third-party SMTP clients. **NOT your webmail login password.** See "SMTP auth code how-to" below. | `abcdefghijklmn` |
    | `RECEIVER` | **The email account that RECEIVES the digest** (inbox). Can be any address, same provider or different, no SMTP setup needed. | `abc@outlook.com` |
-   | `OPENAI_API_KEY` | API key for the LLM. Any OpenAI-compatible provider works (OpenAI, DeepSeek, SiliconFlow, Qwen, etc.). | `sk-xxx` |
-   | `OPENAI_API_BASE` | Base URL of the LLM API. | `https://api.openai.com/v1` |
+   | `LLM_API_KEY` | **Unified** API key for your LLM provider — OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Kimi, MiniMax, Ollama, vLLM, OpenRouter, Groq, SiliconFlow, … all share this single secret. No provider-specific `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` needed. **Pre-rename forks**: legacy `OPENAI_API_KEY` is still honored as a fallback (with a workflow-log deprecation warning). | `sk-xxx`, `sk-ant-xxx`, `AIza…` |
+   | `LLM_API_BASE` | **Unified** base URL. Leave empty for native providers (`openai/…`, `anthropic/…`, `gemini/…`, `groq/…`) — LiteLLM uses each vendor's official endpoint. Set it for OpenAI-compatible third-parties (DeepSeek, Qwen, Kimi, Ollama, vLLM, …). **Pre-rename forks**: legacy `OPENAI_API_BASE` is still honored as a fallback. | `https://api.deepseek.com/v1`, `http://127.0.0.1:11434/v1` |
 
    > **Quick mental model** — there are three email-related values, don't mix them up:
    > - `SENDER` = **outbox address** (sends the mail). Needs a matching `SENDER_PASSWORD` auth code **and** a matching `smtp_server` / `smtp_port` in the YAML config below.
@@ -159,8 +159,8 @@ Same page as Secrets — just switch to the **Variables** tab.
 
 | Variable | Description | Example |
 | :--- | :--- | :--- |
-| `OPENAI_MODEL` | LLM model id used for both scoring and the deep-read summary. Any model your `OPENAI_API_BASE` provider serves. Default `gpt-4o-mini`. | `gpt-4o-mini`, `deepseek-chat`, `Qwen/Qwen2.5-72B-Instruct` |
-| `OPENAI_MAX_TOKENS` | Per-request output token cap. Default `4096`. **Must be ≤ your model's context window** — many OpenAI-compatible providers cap at `8192` (DeepSeek, some Qwen tiers). Setting this too high yields `400 Invalid max_tokens value`. | `4096`, `8192` |
+| `LLM_MODEL` | LiteLLM-style model id used for both scoring and the deep-read summary. See the [provider matrix](#-use-a-different-llm-provider) below. Default `gpt-4o-mini`. **Pre-rename forks**: legacy `OPENAI_MODEL` is still honored as a fallback. | `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4-6`, `gemini/gemini-2.0-flash`, `deepseek/deepseek-chat`, `openai/o3-mini` |
+| `LLM_MAX_TOKENS` | Per-request output token cap. Default `4096`. Auto-renamed to `max_completion_tokens` for reasoning models (`o1`/`o3`/`o4`/`gpt-5`). **Must be ≤ your model's context window.** **Pre-rename forks**: legacy `OPENAI_MAX_TOKENS` is still honored. | `4096`, `8192` |
 | `CUSTOM_CONFIG` | The full YAML configuration (see below). **Must be edited to match your own research keywords / categories / language — not optional.** | *(multi-line YAML)* |
 
 ![custom_config](./assets/config_var.png)
@@ -184,18 +184,14 @@ Same page as Secrets — just switch to the **Variables** tab.
 
    llm:
      api:
-       key: ${oc.env:OPENAI_API_KEY}
-       base_url: ${oc.env:OPENAI_API_BASE}
-     generation_kwargs:
-       model: ${oc.env:OPENAI_MODEL,gpt-4o-mini}                 # Model id. Picks up the OPENAI_MODEL repo variable. Examples: gpt-4o-mini, deepseek-chat, Qwen/Qwen2.5-72B-Instruct
-       max_tokens: ${oc.decode:${oc.env:OPENAI_MAX_TOKENS,4096}} # Per-request OUTPUT token cap. Default 4096. MUST be <= model context window:
-                                                                 #   gpt-4o-mini       → up to 16384
-                                                                 #   deepseek-chat     → up to 8192
-                                                                 #   most Qwen / SiliconFlow tiers → 8192
-                                                                 # Setting this too high yields `400 Invalid max_tokens value` from the provider.
-       temperature: 0.3                                          # 0.0 = deterministic, 1.0 = creative. 0.2-0.4 works well for scoring + summarization.
-       # top_p: 0.9                                              # Optional nucleus sampling. Usually leave unset; tune only if outputs feel too repetitive/random.
-     language: Chinese                                           # Output language for the deep-read summary. Examples: Chinese, English, Japanese. If set to English, the email drops the bilingual title row.
+       key: ${oc.env:LLM_API_KEY}
+       base_url: ${oc.env:LLM_API_BASE}
+     model: ${oc.env:LLM_MODEL,gpt-4o-mini}         # LiteLLM-style id. See the provider matrix below for values like openai/gpt-4o-mini, anthropic/claude-sonnet-4-6, gemini/gemini-2.0-flash, deepseek/deepseek-chat, ollama/qwen2.5:7b-instruct.
+     max_tokens: ${oc.env:LLM_MAX_TOKENS,4096}      # Per-request OUTPUT token cap. Default 4096. Auto-renamed to max_completion_tokens for o-series / gpt-5. MUST be <= model context window.
+     temperature: 0.3                                                  # 0.0 = deterministic, 1.0 = creative. Ignored for reasoning models (o-series / gpt-5).
+     timeout: 60                                                       # Per-request timeout in seconds. Prevents a hung local Ollama from wedging the job.
+     max_retries: 3                                                    # LiteLLM-level retry count on 429/5xx.
+     language: Chinese                                                 # Output language for the deep-read summary. Examples: Chinese, English, Japanese. If set to English, the email drops the bilingual title row.
 
    source:
      arxiv:
@@ -373,7 +369,43 @@ Short answer: **No — both public and private forks run comfortably inside thei
 
 cron-job.org itself is free with no per-call limit on their free tier.
 
-### Full configuration reference
+### 🔌 Use a different LLM provider
+
+This project routes every LLM call through [LiteLLM](https://github.com/BerriAI/litellm), so any of its 100+ providers works by flipping a few env vars. **One unified pair of secrets — `LLM_API_KEY` + `LLM_API_BASE` — covers every provider**, including Anthropic and Gemini. No provider-specific secrets required.
+
+| Provider | `LLM_MODEL` | `LLM_API_BASE` | `LLM_API_KEY` |
+| :--- | :--- | :--- | :--- |
+| **OpenAI — chat** | `openai/gpt-4o-mini`, `openai/gpt-4o` | *(blank)* | your OpenAI key (`sk-…`) |
+| **OpenAI — reasoning** (o1/o3/o4/gpt-5) | `openai/o3-mini`, `openai/gpt-5` | *(blank)* | your OpenAI key — `max_tokens` auto-renamed to `max_completion_tokens`, `temperature` auto-dropped |
+| **Anthropic — native API** | `anthropic/claude-sonnet-4-6`, `anthropic/claude-haiku-4-5-20251001` | *(blank)* | your Anthropic key (`sk-ant-…`) |
+| **Google Gemini — native API** | `gemini/gemini-2.0-flash`, `gemini/gemini-2.5-pro` | *(blank)* | your Gemini key (`AIza…`) |
+| **DeepSeek** | `deepseek/deepseek-chat`, `deepseek/deepseek-reasoner` | `https://api.deepseek.com/v1` | your DeepSeek key |
+| **Qwen (DashScope, OpenAI-compat)** | `openai/qwen-plus`, `openai/qwen-max` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | your DashScope key |
+| **Kimi / Moonshot** | `openai/moonshot-v1-32k`, `openai/moonshot-v1-128k` | `https://api.moonshot.cn/v1` | your Moonshot key |
+| **MiniMax (OpenAI-compat)** | `openai/MiniMax-Text-01`, `openai/abab6.5s-chat` | `https://api.minimax.chat/v1` | your MiniMax key |
+| **OpenRouter** (anything, one key) | `openrouter/anthropic/claude-sonnet-4-6`, `openrouter/openai/gpt-4o-mini` | *(blank)* | your OpenRouter key |
+| **Ollama** (local self-host) | `ollama/qwen2.5:7b-instruct`, `ollama/llama3.1:70b` | `http://127.0.0.1:11434/v1` | any non-empty string (Ollama ignores it) |
+| **vLLM** (self-host, OpenAI-compat) | `openai/<served-model-name>` | `http://<host>:8000/v1` | whatever vLLM is configured with |
+| **Groq** | `groq/llama-3.3-70b-versatile` | *(blank)* | your Groq key |
+| **SiliconFlow** | `openai/Qwen/Qwen2.5-72B-Instruct` | `https://api.siliconflow.cn/v1` | your SiliconFlow key |
+
+**Switching providers is a 3-step operation, no workflow edits required:**
+
+1. Update the repo secret `LLM_API_KEY` with the new provider's key.
+2. Update / clear the repo secret `LLM_API_BASE` per the table above.
+3. Update the repo variable `LLM_MODEL` to the matching LiteLLM-style id.
+
+Notes:
+
+- **Native vs OpenAI-compatible**: `anthropic/…`, `gemini/…`, `groq/…`, `openrouter/…` call each vendor's native API through LiteLLM — leave `LLM_API_BASE` blank. Everything else uses OpenAI-compatible endpoints — set `LLM_API_BASE` to the provider's URL.
+- **Migrating from `OPENAI_*` names** (existing forks): you don't have to do anything urgently — `OPENAI_API_KEY` / `OPENAI_API_BASE` / `OPENAI_MODEL` / `OPENAI_MAX_TOKENS` and the legacy `llm.generation_kwargs` nested YAML block still work. The workflow log will print a one-line deprecation warning when it falls back. To migrate cleanly: create the four `LLM_*` Secrets/Variables with the same values, delete the `OPENAI_*` ones, and (if you customized `CUSTOM_CONFIG`) flatten `llm.generation_kwargs.{model,max_tokens}` onto `llm.{model,max_tokens}` directly.
+- **Small-model tolerance**: the client auto-strips `<think>…</think>` blocks, Markdown ```` ```json ```` fences, and Python-style single-quoted dicts from JSON responses — so DeepSeek, Qwen, and local Ollama runs don't fall back silently on malformed output.
+- **Reasoning-model quirks**: `o1` / `o3` / `o4` / `gpt-5` require `max_completion_tokens` (not `max_tokens`) and reject `temperature` — the client rewrites both for you automatically.
+- **Timeouts & retries**: `llm.timeout` (default 60 s) and `llm.max_retries` (default 3) are forwarded to LiteLLM so a wedged endpoint can't hang the whole Actions job.
+
+---
+
+
 
 See [config/base.yaml](config/base.yaml) for every available knob, including:
 - `executor.reranker` — pick `keyword_llm` (per-paper LLM scoring, simple) or `reader_reviewer` (two-agent: Reader takes structured notes per paper, Reviewer batch-ranks them in one call).
@@ -390,7 +422,7 @@ See [config/base.yaml](config/base.yaml) for every available knob, including:
 Powered by [uv](https://github.com/astral-sh/uv):
 ```bash
 # export SENDER=... SENDER_PASSWORD=... RECEIVER=...
-# export OPENAI_API_KEY=... OPENAI_API_BASE=...
+# export LLM_API_KEY=... LLM_API_BASE=...
 cd Auto-Read-Paper
 uv sync
 DEBUG=true uv run src/auto_read_paper/main.py

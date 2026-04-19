@@ -133,57 +133,53 @@ def test_send_email_starttls_success(config, monkeypatch):
     assert "text/html" in body
 
 
-def test_send_email_falls_back_to_ssl(config, monkeypatch):
-    sent = []
-    call_count = {"smtp": 0}
+def test_send_email_uses_ssl_on_port_465(config, monkeypatch):
+    """Port 465 routes to SMTP_SSL (implicit TLS), bypassing STARTTLS."""
+    from omegaconf import open_dict
 
+    with open_dict(config):
+        config.email.smtp_port = 465
+
+    sent = []
     StubOK = make_stub_smtp(sent)
 
-    class StubSMTP_TLS_Fails:
+    class StubSMTP_Plain_ShouldNotBeCalled:
         def __init__(self, *a, **kw):
-            call_count["smtp"] += 1
-        def starttls(self):
-            raise OSError("TLS not supported")
+            raise AssertionError("plaintext SMTP should not be used on port 465")
 
-    class StubSMTP_SSL(StubOK):
-        pass
-
-    monkeypatch.setattr(smtplib, "SMTP", StubSMTP_TLS_Fails)
-    monkeypatch.setattr(smtplib, "SMTP_SSL", StubSMTP_SSL)
+    monkeypatch.setattr(smtplib, "SMTP", StubSMTP_Plain_ShouldNotBeCalled)
+    monkeypatch.setattr(smtplib, "SMTP_SSL", StubOK)
     send_email(config, "<html>ssl</html>")
     assert len(sent) == 1
 
 
-def test_send_email_falls_back_to_plain(config, monkeypatch):
+def test_send_email_aborts_when_starttls_unsupported(config, monkeypatch):
+    """C2: if STARTTLS fails on a non-SSL port, abort — don't leak credentials."""
     sent = []
-    call_count = {"smtp": 0}
-
-    StubOK = make_stub_smtp(sent)
 
     class StubSMTP_TLS_Fails:
         def __init__(self, *a, **kw):
-            call_count["smtp"] += 1
-            if call_count["smtp"] == 1:
-                pass  # first SMTP() call succeeds, but starttls will fail
-            else:
-                pass  # third SMTP() call is the plain fallback
-        def starttls(self):
-            raise OSError("TLS not supported")
-        def login(self, u, p):
             pass
-        def sendmail(self, s, r, m):
-            sent.append((s, r, m))
+        def starttls(self):
+            raise smtplib.SMTPNotSupportedError("STARTTLS extension not supported")
         def quit(self):
             pass
 
-    class StubSMTP_SSL_Fails:
-        def __init__(self, *a, **kw):
-            raise OSError("SSL not supported")
-
     monkeypatch.setattr(smtplib, "SMTP", StubSMTP_TLS_Fails)
-    monkeypatch.setattr(smtplib, "SMTP_SSL", StubSMTP_SSL_Fails)
-    send_email(config, "<html>plain</html>")
-    assert len(sent) == 1
+    with pytest.raises(RuntimeError, match="STARTTLS unavailable"):
+        send_email(config, "<html>plain</html>")
+    assert sent == []
+
+
+def test_send_email_rejects_crlf_in_sender(config):
+    """M1: refuse CR/LF in email addresses to prevent SMTP header injection."""
+    from omegaconf import open_dict
+
+    with open_dict(config):
+        config.email.sender = "attacker@example.com\r\nBcc: victim@example.com"
+
+    with pytest.raises(ValueError, match="illegal CR/LF"):
+        send_email(config, "<html>hi</html>")
 
 
 # ---------------------------------------------------------------------------

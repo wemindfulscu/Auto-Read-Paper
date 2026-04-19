@@ -56,6 +56,13 @@ jobs:
           SENDER: ${{ secrets.SENDER }}
           RECEIVER: ${{ secrets.RECEIVER }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          # Primary unified LLM credentials.
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_BASE: ${{ secrets.LLM_API_BASE }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_MAX_TOKENS: ${{ vars.LLM_MAX_TOKENS }}
+          # Deprecated fallbacks — kept so pre-rename forks keep running. Migrate
+          # to the LLM_* names above and delete these rows once done.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
@@ -63,16 +70,26 @@ jobs:
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
           SKIP_DEDUP: ${{ inputs.skip_dedup && '1' || '' }}
         run: |
-          # GitHub Actions exports empty string when vars.X is unset, which defeats
-          # OmegaConf's ${oc.env:X,default} fallback. Re-default here.
-          if [ -z "${OPENAI_MODEL:-}" ]; then export OPENAI_MODEL="gpt-4o-mini"; fi
-          if [ -z "${OPENAI_MAX_TOKENS:-}" ]; then export OPENAI_MAX_TOKENS="4096"; fi
-          echo "Using OPENAI_MODEL=$OPENAI_MODEL"
-          echo "Using OPENAI_MAX_TOKENS=$OPENAI_MAX_TOKENS"
+          # Surface which name family is in use so a misconfigured fork debugs
+          # in seconds instead of staring at a 401 from LiteLLM.
+          if [ -n "${LLM_API_KEY:-}" ]; then
+            echo "Using LLM_API_KEY (new name)"
+          elif [ -n "${OPENAI_API_KEY:-}" ]; then
+            echo "::warning::Using OPENAI_API_KEY (deprecated). Rename your repo secret to LLM_API_KEY — see README."
+          else
+            echo "::error::Neither LLM_API_KEY nor OPENAI_API_KEY is set."
+            exit 1
+          fi
+          [ -n "${OPENAI_MODEL:-}" ] && [ -z "${LLM_MODEL:-}" ] && echo "::warning::Using OPENAI_MODEL (deprecated). Rename your repo variable to LLM_MODEL."
+          [ -n "${OPENAI_MAX_TOKENS:-}" ] && [ -z "${LLM_MAX_TOKENS:-}" ] && echo "::warning::Using OPENAI_MAX_TOKENS (deprecated). Rename your repo variable to LLM_MAX_TOKENS."
+          echo "Effective model: ${LLM_MODEL:-${OPENAI_MODEL:-gpt-4o-mini}}"
+          echo "Effective max_tokens: ${LLM_MAX_TOKENS:-${OPENAI_MAX_TOKENS:-4096}}"
           if [ -n "$CUSTOM_CONFIG" ]; then
-            # Use %s (not %b) so backslashes in the user's YAML are preserved literally.
-            printf "%s\n" "$CUSTOM_CONFIG" > config/custom.yaml
-            echo "Wrote config/custom.yaml from CUSTOM_CONFIG repo variable."
+            # C1 fix: route CUSTOM_CONFIG through a sanitizer that rejects
+            # ${...} interpolations (they would otherwise let a tampered repo
+            # variable exfiltrate LLM_API_KEY / SENDER_PASSWORD via
+            # OmegaConf's resolver). Aborts the workflow on any violation.
+            uv run --with pyyaml python scripts/sanitize_custom_config.py config/custom.yaml <<< "$CUSTOM_CONFIG"
           else
             echo "::warning::CUSTOM_CONFIG repo variable is empty — falling back to repo's config/custom.yaml (neutral: will fail loudly)."
           fi

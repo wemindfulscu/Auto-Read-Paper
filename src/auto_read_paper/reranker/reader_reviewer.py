@@ -8,16 +8,13 @@ Pipeline:
 """
 from __future__ import annotations
 
-import json
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import tiktoken
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
-from openai import OpenAI
 from tqdm import tqdm
 
+from ..llm_client import LLMClient
 from ..protocol import Paper, CorpusPaper
 from .base import BaseReranker, register_reranker
 from .keyword_llm import _normalize_keywords, count_keyword_hits
@@ -62,25 +59,8 @@ REVIEWER_SYSTEM_PROMPT = (
 )
 
 
-def _truncate_to_tokens(text: str, max_tokens: int) -> str:
-    if not text:
-        return ""
-    enc = tiktoken.encoding_for_model("gpt-4o")
-    toks = enc.encode(text)
-    if len(toks) <= max_tokens:
-        return text
-    return enc.decode(toks[:max_tokens])
-
-
-def _parse_reader_json(content: str) -> dict | None:
-    if not content:
-        return None
-    m = re.search(r"\{.*\}", content, flags=re.DOTALL)
-    if not m:
-        return None
-    try:
-        data = json.loads(m.group(0))
-    except Exception:
+def _normalize_reader_notes(data) -> dict | None:
+    if not isinstance(data, dict):
         return None
     out = {}
     for k in ("task", "method", "contributions", "results", "limitations"):
@@ -89,15 +69,8 @@ def _parse_reader_json(content: str) -> dict | None:
     return out
 
 
-def _parse_reviewer_json(content: str, expected_ids: set[int]) -> list[dict] | None:
-    if not content:
-        return None
-    m = re.search(r"\{.*\}", content, flags=re.DOTALL)
-    if not m:
-        return None
-    try:
-        data = json.loads(m.group(0))
-    except Exception:
+def _normalize_reviewer_rankings(data, expected_ids: set[int]) -> list[dict] | None:
+    if not isinstance(data, dict):
         return None
     rankings = data.get("rankings")
     if not isinstance(rankings, list):
@@ -156,13 +129,7 @@ class ReaderReviewerReranker(BaseReranker):
             if config.source.arxiv.get("keywords") is not None
             else None
         )
-        self.client = OpenAI(
-            api_key=config.llm.api.key,
-            base_url=config.llm.api.base_url,
-        )
-        self.model_kwargs = OmegaConf.to_container(
-            config.llm.generation_kwargs, resolve=True
-        ) or {}
+        self.llm = LLMClient.from_config(config.llm)
 
     def get_similarity_score(self, s1, s2):  # pragma: no cover - not used
         raise NotImplementedError("reader_reviewer reranker does not use similarity scoring")
@@ -175,24 +142,22 @@ class ReaderReviewerReranker(BaseReranker):
             body += f"Abstract: {paper.abstract}\n\n"
         if paper.full_text:
             body += f"Main content preview:\n{paper.full_text}\n"
-        body = _truncate_to_tokens(body, self.reader_max_tokens)
+        body = self.llm.truncate_to_tokens(body, self.reader_max_tokens)
         if not body.strip():
             return None
         try:
-            resp = self.client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": READER_SYSTEM_PROMPT},
-                    {"role": "user", "content": body},
-                ],
-                **self.model_kwargs,
+            from ..protocol import _wrap_untrusted
+            data = self.llm.complete_json(
+                system=READER_SYSTEM_PROMPT,
+                user=_wrap_untrusted(body),
+                expect="object",
             )
-            content = resp.choices[0].message.content or ""
         except Exception as e:
             logger.warning(f"Reader failed for {paper.title}: {e}")
             return None
-        notes = _parse_reader_json(content)
+        notes = _normalize_reader_notes(data)
         if notes is None:
-            logger.warning(f"Unparseable Reader output for {paper.title}: {content[:200]}")
+            logger.warning(f"Unparseable Reader output for {paper.title}")
         return notes
 
     def _build_reviewer_prompt(self, paper_notes: list[tuple[int, Paper, dict]]) -> str:
@@ -220,16 +185,15 @@ class ReaderReviewerReranker(BaseReranker):
         )
         return "\n".join(lines)
 
-    def _call_reviewer(self, prompt: str, extra_system: str = "") -> str:
+    def _call_reviewer(self, prompt: str, expected_ids: set[int], extra_system: str = "") -> list[dict] | None:
+        from ..protocol import _wrap_untrusted
         system = REVIEWER_SYSTEM_PROMPT + (("\n\n" + extra_system) if extra_system else "")
-        resp = self.client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ],
-            **self.model_kwargs,
+        data = self.llm.complete_json(
+            system=system,
+            user=_wrap_untrusted(prompt),
+            expect="object",
         )
-        return resp.choices[0].message.content or ""
+        return _normalize_reviewer_rankings(data, expected_ids)
 
     @staticmethod
     def _is_collapsed(rankings: list[dict]) -> bool:
@@ -254,13 +218,12 @@ class ReaderReviewerReranker(BaseReranker):
         expected_ids = {pid for pid, _, _ in paper_notes}
         prompt = self._build_reviewer_prompt(paper_notes)
         try:
-            content = self._call_reviewer(prompt)
+            rankings = self._call_reviewer(prompt, expected_ids)
         except Exception as e:
             logger.warning(f"Reviewer batch failed: {e}")
             return None
-        rankings = _parse_reviewer_json(content, expected_ids)
         if rankings is None:
-            logger.warning(f"Unparseable Reviewer output: {content[:300]}")
+            logger.warning("Unparseable Reviewer output")
             return None
 
         # Second-chance retry when the Reviewer returns a collapsed ranking
@@ -281,11 +244,10 @@ class ReaderReviewerReranker(BaseReranker):
                 "all papers around a single value."
             )
             try:
-                content2 = self._call_reviewer(prompt, extra_system=stricter)
+                rankings2 = self._call_reviewer(prompt, expected_ids, extra_system=stricter)
             except Exception as e:
                 logger.warning(f"Reviewer retry failed: {e} — keeping first-pass rankings")
                 return rankings
-            rankings2 = _parse_reviewer_json(content2, expected_ids)
             if rankings2 is not None and not self._is_collapsed(rankings2):
                 logger.info("Reviewer retry succeeded — using retried rankings.")
                 return rankings2

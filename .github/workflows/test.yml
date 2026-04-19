@@ -21,14 +21,21 @@ jobs:
           SENDER: ${{ secrets.SENDER }}
           RECEIVER: ${{ secrets.RECEIVER }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_BASE: ${{ secrets.LLM_API_BASE }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_MAX_TOKENS: ${{ vars.LLM_MAX_TOKENS }}
+          # Deprecated fallbacks — kept so pre-rename forks keep running.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          OPENAI_MAX_TOKENS: ${{ vars.OPENAI_MAX_TOKENS }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
           export DEBUG=true
           if [ -n "$CUSTOM_CONFIG" ]; then
-            printf "%s\n" "$CUSTOM_CONFIG" > config/custom.yaml
-            echo "Wrote config/custom.yaml from CUSTOM_CONFIG repo variable."
+            # C1 fix: sanitize before writing (rejects ${...} interpolations).
+            uv run --with pyyaml python scripts/sanitize_custom_config.py config/custom.yaml <<< "$CUSTOM_CONFIG"
           else
             echo "::warning::CUSTOM_CONFIG repo variable is empty — falling back to repo's config/custom.yaml (neutral: will fail loudly)."
           fi

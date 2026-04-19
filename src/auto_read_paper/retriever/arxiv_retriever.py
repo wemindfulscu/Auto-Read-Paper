@@ -4,6 +4,7 @@ from arxiv import Result as ArxivResult
 from ..protocol import Paper
 from ..utils import extract_markdown_from_pdf, extract_tex_code_from_tar
 from tempfile import TemporaryDirectory
+from urllib.parse import urlparse
 import feedparser
 from tqdm import tqdm
 import multiprocessing
@@ -27,14 +28,39 @@ DOWNLOAD_TIMEOUT = (10, 60)
 PDF_EXTRACT_TIMEOUT = 180
 TAR_EXTRACT_TIMEOUT = 180
 
+# M2: allowlist + size cap for paper-file downloads. Plugin retrievers that
+# produce URLs pointing at unexpected hosts now fail loud rather than
+# silently streaming arbitrary content. 50 MB covers every arXiv PDF /
+# source tarball seen in practice; adversarial streams get cut off.
+_ALLOWED_DOWNLOAD_HOSTS = {
+    "arxiv.org",
+    "www.arxiv.org",
+    "export.arxiv.org",
+    "static.arxiv.org",
+}
+MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+
 
 def _download_file(url: str, path: str) -> None:
+    host = (urlparse(url).hostname or "").lower()
+    if host not in _ALLOWED_DOWNLOAD_HOSTS:
+        raise ValueError(
+            f"Refusing to download from untrusted host {host!r}; "
+            f"allowed hosts: {sorted(_ALLOWED_DOWNLOAD_HOSTS)}"
+        )
+    total = 0
     with requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT) as response:
         response.raise_for_status()
         with open(path, "wb") as file:
             for chunk in response.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    file.write(chunk)
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_DOWNLOAD_BYTES:
+                    raise ValueError(
+                        f"Download from {url} exceeded {MAX_DOWNLOAD_BYTES} bytes"
+                    )
+                file.write(chunk)
 
 
 def _run_in_subprocess(
@@ -144,7 +170,11 @@ class ArxivRetriever(BaseRetriever):
         id_list = ",".join(paper_ids)
         url = f"http://export.arxiv.org/api/query?id_list={id_list}&max_results={len(paper_ids)}"
         try:
-            feed = feedparser.parse(url)
+            # M8: feedparser has no built-in timeout — fetch bytes ourselves
+            # with an explicit budget so a stalled arXiv can't hang the job.
+            resp = requests.get(url, timeout=(10, 30))
+            resp.raise_for_status()
+            feed = feedparser.parse(resp.content)
         except Exception as exc:
             logger.warning(f"Affiliation batch fetch failed: {exc}")
             return {}
@@ -232,7 +262,13 @@ class ArxivRetriever(BaseRetriever):
         query = '+'.join(self.config.source.arxiv.category)
         include_cross_list = self.config.source.arxiv.get("include_cross_list", False)
         # Get the latest paper from arxiv rss feed
-        feed = feedparser.parse(f"https://rss.arxiv.org/atom/{query}")
+        rss_url = f"https://rss.arxiv.org/atom/{query}"
+        try:
+            rss_resp = requests.get(rss_url, timeout=(10, 30))
+            rss_resp.raise_for_status()
+            feed = feedparser.parse(rss_resp.content)
+        except Exception as exc:
+            raise Exception(f"Failed to fetch arXiv RSS feed ({rss_url}): {exc}") from exc
         if 'Feed error for query' in feed.feed.title:
             raise Exception(f"Invalid ARXIV_QUERY: {query}.")
         raw_papers = []

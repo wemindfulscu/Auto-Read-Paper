@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import json
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
-from openai import OpenAI
 from tqdm import tqdm
 
-from ..protocol import Paper, CorpusPaper
+from ..llm_client import LLMClient
+from ..protocol import Paper, CorpusPaper, _wrap_untrusted
 from .base import BaseReranker, register_reranker
 
 
@@ -52,19 +50,14 @@ def count_keyword_hits(paper: Paper, keywords: list[str]) -> int:
     return sum(1 for kw in keywords if kw in text)
 
 
-def _parse_score_json(content: str) -> dict[str, float] | None:
-    if not content:
-        return None
-    m = re.search(r"\{.*\}", content, flags=re.DOTALL)
-    if not m:
-        return None
-    try:
-        data = json.loads(m.group(0))
-    except Exception:
+def _normalize_score_json(data) -> dict[str, float] | None:
+    if not isinstance(data, dict):
         return None
     out = {}
     for k in ("innovation", "relevance", "potential"):
         v = data.get(k)
+        if isinstance(v, bool):
+            return None
         if isinstance(v, (int, float)):
             out[k] = float(max(0, min(10, v)))
         else:
@@ -97,13 +90,7 @@ class KeywordLLMReranker(BaseReranker):
             if config.source.arxiv.get("keywords") is not None
             else None
         )
-        self.client = OpenAI(
-            api_key=config.llm.api.key,
-            base_url=config.llm.api.base_url,
-        )
-        self.model_kwargs = OmegaConf.to_container(
-            config.llm.generation_kwargs, resolve=True
-        ) or {}
+        self.llm = LLMClient.from_config(config.llm)
         self.language = config.llm.get("language", "Chinese")
 
     def get_similarity_score(self, s1, s2):  # pragma: no cover - not used
@@ -113,28 +100,27 @@ class KeywordLLMReranker(BaseReranker):
         user_prompt = (
             f"Rate the following paper. User research keywords: "
             f"{', '.join(self.keywords) if self.keywords else '(not provided)'}.\n\n"
-            f"Title: {paper.title}\n\nAbstract: {paper.abstract}\n\n"
-            f"Scoring rubric:\n"
+            + _wrap_untrusted(
+                f"Title: {paper.title}\n\nAbstract: {paper.abstract}"
+            )
+            + "\n\nScoring rubric:\n"
             f"- innovation (0-10): novelty of method/idea\n"
             f"- relevance (0-10): alignment with the user's keywords\n"
             f"- potential (0-10): likely real-world or research impact\n"
             f"Return JSON only."
         )
         try:
-            resp = self.client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": SCORE_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                **self.model_kwargs,
+            data = self.llm.complete_json(
+                system=SCORE_SYSTEM_PROMPT,
+                user=user_prompt,
+                expect="object",
             )
-            content = resp.choices[0].message.content or ""
         except Exception as e:
             logger.warning(f"LLM scoring failed for {paper.title}: {e}")
             return None
-        parsed = _parse_score_json(content)
+        parsed = _normalize_score_json(data)
         if parsed is None:
-            logger.warning(f"Unparseable LLM score for {paper.title}: {content[:200]}")
+            logger.warning(f"Unparseable LLM score for {paper.title}")
         return parsed
 
     def rerank(self, candidates: list[Paper], corpus: list[CorpusPaper]) -> list[Paper]:
