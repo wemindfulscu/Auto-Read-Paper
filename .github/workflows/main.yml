@@ -44,7 +44,7 @@ jobs:
       # never leaks its scored papers to downstream forks) and avoids bloating
       # the repo with one commit per run.
       - name: Restore rolling score history
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: state/score_history.json
           key: score-history-${{ github.run_id }}
@@ -121,7 +121,7 @@ jobs:
       # "duplicate email at the same time" symptom this defends against.
       - name: Save rolling score history
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: state/score_history.json
           key: score-history-${{ github.run_id }}

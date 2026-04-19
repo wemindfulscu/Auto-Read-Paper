@@ -10,6 +10,7 @@ from auto_read_paper.llm_client import (
     _extract_json_blob,
     _is_reasoning_model,
     _loads_tolerant,
+    _normalize_model_name,
     _supports_json_mode,
 )
 
@@ -47,6 +48,28 @@ def test_is_reasoning_model(model, expected):
 ])
 def test_supports_json_mode(model, expected):
     assert _supports_json_mode(model) is expected
+
+
+# ---- model-name normalization -----------------------------------------
+
+@pytest.mark.parametrize("model,base_url,expected", [
+    # Already-prefixed names pass through.
+    ("openai/gpt-4o-mini", None, "openai/gpt-4o-mini"),
+    ("anthropic/claude-sonnet-4-6", None, "anthropic/claude-sonnet-4-6"),
+    ("deepseek/deepseek-chat", "https://api.deepseek.com/v1", "deepseek/deepseek-chat"),
+    ("ollama/qwen2.5:7b-instruct", "http://localhost:11434/v1", "ollama/qwen2.5:7b-instruct"),
+    # Bare names get openai/ prefix (OpenAI-compatible endpoints).
+    ("MiniMax-M2.7", "https://api.minimax.chat/v1", "openai/MiniMax-M2.7"),
+    ("qwen2.5-72b-instruct", "https://dashscope.aliyuncs.com/compatible-mode/v1",
+     "openai/qwen2.5-72b-instruct"),
+    ("gpt-4o-mini", None, "openai/gpt-4o-mini"),
+    # Whitespace tolerated.
+    ("  gpt-4o  ", None, "openai/gpt-4o"),
+    # Empty stays empty.
+    ("", None, ""),
+])
+def test_normalize_model_name(model, base_url, expected):
+    assert _normalize_model_name(model, base_url) == expected
 
 
 # ---- JSON extraction ---------------------------------------------------
@@ -193,7 +216,7 @@ def test_from_config_legacy_generation_kwargs():
         "generation_kwargs": {"model": "gpt-4o-mini", "max_tokens": 4096},
     }
     c = LLMClient.from_config(cfg)
-    assert c.model == "gpt-4o-mini"
+    assert c.model == "openai/gpt-4o-mini"
     assert c.max_tokens == 4096
 
 

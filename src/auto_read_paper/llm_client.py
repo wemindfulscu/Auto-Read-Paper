@@ -118,6 +118,51 @@ def _loads_tolerant(blob: str) -> Any:
         return json.loads(swapped)
 
 
+# Known LiteLLM provider prefixes. If a model name starts with any of these
+# followed by "/", we assume the user already routed it explicitly.
+_KNOWN_PROVIDER_PREFIXES = (
+    "openai/", "azure/", "anthropic/", "gemini/", "vertex_ai/",
+    "deepseek/", "mistral/", "together_ai/", "groq/", "fireworks_ai/",
+    "openrouter/", "ollama/", "huggingface/", "bedrock/", "cohere/",
+    "replicate/", "perplexity/", "xai/", "cerebras/", "sambanova/",
+    "nvidia_nim/", "nscale/", "watsonx/", "ai21/", "palm/",
+)
+
+
+def _normalize_model_name(model: str, base_url: str | None) -> str:
+    """Auto-prepend ``openai/`` when the model has no provider prefix.
+
+    LiteLLM requires a ``provider/`` prefix to know how to route. A bare
+    ``MiniMax-M2.7`` or ``qwen2.5-72b-instruct`` raises BadRequestError
+    ("LLM Provider NOT provided"). When the user has configured a custom
+    ``base_url`` they almost certainly want the OpenAI-compatible
+    ``/v1/chat/completions`` shape (MiniMax / Qwen / Kimi / DeepSeek
+    custom endpoints / local vLLM / LM Studio all fit), so default the
+    prefix to ``openai/``. If the name already carries a known prefix,
+    leave it untouched.
+    """
+    if not model:
+        return model
+    m = model.strip()
+    lower = m.lower()
+    if any(lower.startswith(p) for p in _KNOWN_PROVIDER_PREFIXES):
+        return m
+    # Bare name. Auto-prefix so LiteLLM routes via the OpenAI-compatible
+    # path. This is correct for any custom base_url and harmless for the
+    # OpenAI native endpoint (same path).
+    normalized = f"openai/{m}"
+    if base_url:
+        logger.info(
+            f"LLMClient: model {m!r} has no provider prefix; treating as "
+            f"{normalized!r} (OpenAI-compatible endpoint at {base_url})."
+        )
+    else:
+        logger.info(
+            f"LLMClient: model {m!r} has no provider prefix; treating as {normalized!r}."
+        )
+    return normalized
+
+
 class LLMClient:
     """Thin wrapper around `litellm.completion`.
 
@@ -140,7 +185,7 @@ class LLMClient:
     ):
         if not model:
             raise ValueError("LLMClient requires a non-empty model name")
-        self.model = model
+        self.model = _normalize_model_name(model, base_url)
         self.api_key = api_key or None
         self.base_url = base_url or None
         self.max_tokens = int(max_tokens) if max_tokens else None
