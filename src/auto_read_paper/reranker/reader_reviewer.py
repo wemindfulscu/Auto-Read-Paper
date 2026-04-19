@@ -258,12 +258,20 @@ class ReaderReviewerReranker(BaseReranker):
             )
         return rankings
 
-    def rerank(self, candidates: list[Paper], corpus: list[CorpusPaper]) -> list[Paper]:
+    def rerank(
+        self,
+        candidates: list[Paper],
+        corpus: list[CorpusPaper],
+        *,
+        skip_keyword_filter: bool = False,
+    ) -> list[Paper]:
         if not candidates:
             return []
 
-        # Belt & suspenders: keyword pre-filter (retriever may already have done this)
-        if self.keywords:
+        # Belt & suspenders: keyword pre-filter (retriever may already have done this).
+        # Skipped when the executor is explicitly rescuing keyword-filtered-out
+        # papers to fill an under-sized pool.
+        if self.keywords and not skip_keyword_filter:
             filtered = [p for p in candidates if count_keyword_hits(p, self.keywords) > 0]
             logger.info(
                 f"Keyword pre-filter: {len(filtered)}/{len(candidates)} papers kept "

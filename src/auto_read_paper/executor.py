@@ -1,12 +1,46 @@
 from loguru import logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from .retriever import get_retriever_cls
 from .reranker import get_reranker_cls
+from .reranker.keyword_llm import _normalize_keywords, count_keyword_hits
 from .construct_email import render_email
 from .utils import send_email
-from .history import ScoreHistory, _today_iso
+from .history import ScoreHistory, _today_iso, _paper_id
 from .llm_client import LLMClient
 from tqdm import tqdm
+
+
+def _expand_keywords(llm: LLMClient, keywords: list[str], n: int = 12) -> list[str]:
+    """Ask the LLM for related/alternative keywords covering the same research
+    area. Used to refill the candidate pool when too few papers hit the
+    user's exact keywords — instead of dropping the filter entirely and
+    letting unrelated papers in, we broaden the filter with AI-suggested
+    synonyms, abbreviations, and adjacent subtopics."""
+    if not keywords:
+        return []
+    system = (
+        "You are a research librarian. Given a user's research keywords, "
+        "produce related terms, common synonyms, and abbreviations that "
+        "would match papers on the same topics. Stay tight to the user's "
+        "research area — do not drift into unrelated fields."
+    )
+    user = (
+        f"User keywords: {', '.join(keywords)}\n\n"
+        f"Return ONLY a JSON array of up to {n} additional keywords (strings), "
+        f"lowercase, no duplicates of the user's keywords, no prose."
+    )
+    result = llm.complete_json(system=system, user=user, expect="array")
+    if not isinstance(result, list):
+        logger.warning("Keyword expansion LLM call returned no usable list")
+        return []
+    seen = {k.lower() for k in keywords}
+    expanded: list[str] = []
+    for k in result:
+        if isinstance(k, str) and k.strip() and k.strip().lower() not in seen:
+            kw = k.strip().lower()
+            expanded.append(kw)
+            seen.add(kw)
+    return expanded
 
 
 class Executor:
@@ -59,11 +93,26 @@ class Executor:
             all_papers = self.history.filter_new_papers(all_papers)
             logger.info(f"{len(all_papers)} new papers need scoring today")
 
+        # Segregate today's fresh retrieval by the keyword filter so we can
+        # dip into the spillover (keyword-mismatched) half if the primary
+        # pool doesn't fill max_n. The rerankers will apply the same filter
+        # internally; segregating up-front just lets us re-score the rejects.
+        kw_cfg = arxiv_cfg.get("keywords") if arxiv_cfg is not None else None
+        keywords = _normalize_keywords(
+            OmegaConf.to_container(kw_cfg, resolve=True) if kw_cfg is not None else []
+        )
+        if keywords:
+            primary_today = [p for p in all_papers if count_keyword_hits(p, keywords) > 0]
+            spillover_today = [p for p in all_papers if count_keyword_hits(p, keywords) == 0]
+        else:
+            primary_today = list(all_papers)
+            spillover_today = []
+
         # Score today's new papers.
         scored_today: list = []
-        if all_papers:
+        if primary_today:
             logger.info("Reranking papers (keyword filter + LLM scoring)...")
-            scored_today = self.reranker.rerank(all_papers, [])
+            scored_today = self.reranker.rerank(primary_today, [])
 
         # Record today's scores, then merge with unsent history into the candidate pool.
         # unsent_papers() never includes papers already sent on ANY day — each push
@@ -83,6 +132,58 @@ class Executor:
         pool.sort(key=lambda p: p.score or 0.0, reverse=True)
         max_n = max(0, int(self.config.executor.max_paper_num))
         top_papers = pool[:max_n]
+
+        # Spillover fill: if the keyword-matched pool doesn't reach max_n,
+        # ask the LLM to broaden the keyword set (synonyms, abbreviations,
+        # adjacent subtopics), filter today's keyword-rejected papers with
+        # the expanded set, and rescore whatever matches. This keeps the
+        # email topically relevant — we never surface arbitrary off-topic
+        # papers just to hit max_n. Already-sent and already-scored papers
+        # are excluded so we don't re-surface old content.
+        if len(top_papers) < max_n and spillover_today and keywords:
+            already_scored = self.history.existing_ids() if self.history is not None else set()
+            sent_ids = (
+                {e.get("id") for e in self.history.entries if e.get("sent_at")}
+                if self.history is not None
+                else set()
+            )
+            fresh_spill = [
+                p for p in spillover_today
+                if _paper_id(p) not in already_scored and _paper_id(p) not in sent_ids
+            ]
+            if fresh_spill:
+                logger.info(
+                    f"Pool short ({len(top_papers)}/{max_n}) — expanding keywords "
+                    f"via LLM to rescue topically-related spillover papers"
+                )
+                expanded = _expand_keywords(self.llm, keywords)
+                if expanded:
+                    logger.info(f"LLM-expanded keywords: {expanded}")
+                    combined = keywords + expanded
+                    matched_spill = [
+                        p for p in fresh_spill if count_keyword_hits(p, combined) > 0
+                    ]
+                    logger.info(
+                        f"Spillover filter (expanded keywords): "
+                        f"{len(matched_spill)}/{len(fresh_spill)} papers kept"
+                    )
+                else:
+                    matched_spill = []
+                    logger.warning(
+                        "Keyword expansion produced no usable terms — leaving pool short "
+                        "rather than injecting off-topic papers."
+                    )
+                if matched_spill:
+                    scored_spill = self.reranker.rerank(
+                        matched_spill, [], skip_keyword_filter=True
+                    )
+                    if self.history is not None:
+                        self.history.record_newly_scored(scored_spill, today)
+                        pool = self.history.unsent_papers()
+                    else:
+                        pool = pool + list(scored_spill)
+                    pool.sort(key=lambda p: p.score or 0.0, reverse=True)
+                    top_papers = pool[:max_n]
 
         # Last-resort heartbeat: if even the unsent pool is empty (first run,
         # very quiet day, or the user already consumed everything in previous
@@ -104,11 +205,10 @@ class Executor:
                     sent_ids = {
                         e.get("id") for e in self.history.entries if e.get("sent_at")
                     }
-                    from .history import _paper_id
                     fb = [p for p in fb if _paper_id(p) not in sent_ids]
                 if fb:
                     logger.info(f"Scoring {len(fb)} heartbeat papers")
-                    fb = self.reranker.rerank(fb, [])
+                    fb = self.reranker.rerank(fb, [], skip_keyword_filter=True)
                     fb.sort(key=lambda p: p.score or 0.0, reverse=True)
                     top_papers = fb[:max_n]
                     if self.history is not None:
