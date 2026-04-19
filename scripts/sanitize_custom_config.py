@@ -2,10 +2,12 @@
 
 Reads YAML from stdin, enforces:
   - parseable via yaml.safe_load (rejects !!python/obj, custom tags, aliases)
-  - no string value contains an OmegaConf interpolation (${...}), which
-    would otherwise let a tampered repo variable exfiltrate env secrets
-    like LLM_API_KEY / SENDER_PASSWORD through OmegaConf's resolver
-  - no embedded CR/LF in string values (defensive)
+  - the only OmegaConf interpolation allowed in string values is the
+    documented ${oc.env:VAR} / ${oc.env:VAR,default} form. Anything else
+    (${oc.decode:...}, ${env:...}, nested ${${...}}, custom resolvers)
+    is refused — those are the shapes a tampered repo variable could
+    use to exfiltrate env secrets like LLM_API_KEY / SENDER_PASSWORD.
+  - no embedded CR/LF in string values (defensive against header injection)
   - size cap so a megabyte of payload can't wedge the parser
 
 On success, writes the re-emitted YAML (via yaml.safe_dump) to the path
@@ -21,7 +23,16 @@ import yaml
 
 
 MAX_PAYLOAD_BYTES = 64 * 1024  # 64 KiB is plenty for a config override
+
+# Any ${...} occurrence — used for the deny pass.
 INTERP_RE = re.compile(r"\$\{[^}]*\}")
+
+# The single allowed interpolation shape: ${oc.env:VAR} or
+# ${oc.env:VAR,default}. VAR must be a normal env-var identifier and the
+# default (if present) must not itself contain another ${...}.
+SAFE_OC_ENV_RE = re.compile(
+    r"^\$\{oc\.env:[A-Za-z_][A-Za-z0-9_]*(?:,[^${}]*)?\}$"
+)
 
 
 def _walk_strings(node, path="root"):
@@ -35,6 +46,14 @@ def _walk_strings(node, path="root"):
             yield from _walk_strings(v, f"{path}[{i}]")
     elif isinstance(node, str):
         yield path, node
+
+
+def _interpolations_are_safe(value: str) -> tuple[bool, str | None]:
+    """True iff every ${...} in value is a plain ${oc.env:VAR[,default]}."""
+    for match in INTERP_RE.finditer(value):
+        if not SAFE_OC_ENV_RE.match(match.group(0)):
+            return False, match.group(0)
+    return True, None
 
 
 def main() -> int:
@@ -74,14 +93,15 @@ def main() -> int:
         return 1
 
     for path, value in _walk_strings(data):
-        if INTERP_RE.search(value):
+        ok, bad = _interpolations_are_safe(value)
+        if not ok:
             print(
-                f"sanitize: refusing ${{...}} interpolation in CUSTOM_CONFIG at {path!r} "
-                f"(would allow env-secret exfiltration via OmegaConf)",
+                f"sanitize: refusing unsafe interpolation {bad!r} at {path!r} "
+                f"(only ${{oc.env:VAR}} / ${{oc.env:VAR,default}} is allowed)",
                 file=sys.stderr,
             )
             return 1
-        if "\r" in value or "\n" in value and path.endswith(("sender", "receiver", "smtp_server")):
+        if "\r" in value or "\n" in value:
             print(f"sanitize: refusing CR/LF in {path!r}", file=sys.stderr)
             return 1
 
@@ -94,3 +114,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
