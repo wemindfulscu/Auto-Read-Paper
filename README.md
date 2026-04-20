@@ -204,9 +204,9 @@ Same page as Secrets — just switch to the **Variables** tab.
        key: ${oc.env:LLM_API_KEY}
        base_url: ${oc.env:LLM_API_BASE}
      model: ${oc.env:LLM_MODEL,gpt-4o-mini}         # LiteLLM-style id. See the provider matrix below for values like openai/gpt-4o-mini, anthropic/claude-sonnet-4-6, gemini/gemini-2.0-flash, deepseek/deepseek-chat, ollama/qwen2.5:7b-instruct.
-     max_tokens: ${oc.env:LLM_MAX_TOKENS,4096}      # Per-request OUTPUT token cap. Default 4096. Auto-renamed to max_completion_tokens for o-series / gpt-5. MUST be <= model context window.
+     max_tokens: ${oc.env:LLM_MAX_TOKENS,4096}      # Per-request OUTPUT token cap. Default 4096. Auto-renamed to max_completion_tokens for o-series / gpt-5. MUST be <= model context window. **Raise this (e.g. 16384) if your daily candidate pool is large, or if you use a reasoning model (MiniMax-M2.7, deepseek-reasoner, o-series) — reasoning tokens eat the budget before the JSON is emitted, causing truncated/unparseable output.**
      temperature: 0.3                                                  # 0.0 = deterministic, 1.0 = creative. Ignored for reasoning models (o-series / gpt-5).
-     timeout: 60                                                       # Per-request timeout in seconds. Prevents a hung local Ollama from wedging the job.
+     timeout: 180                                                      # Per-request timeout in seconds. Default 180. **Raise this (e.g. 600) if your daily candidate pool is large, or if you use a slow reasoning model — the Reviewer batch call can otherwise time out and fall back to keyword-hit scoring.**
      max_retries: 3                                                    # LiteLLM-level retry count on 429/5xx.
      language: Chinese                                                 # Output language for the deep-read summary. Examples: Chinese, English, Japanese. If set to English, the email drops the bilingual title row.
 
@@ -361,30 +361,11 @@ On the job's detail page click **Test run** (or *Execute now*). Within a few sec
 
 ---
 
-#### 7️⃣ Forget about it — runs every day automatically
-
-Because scheduling is external (cron-job.org, not GitHub `schedule:`), GitHub's **60-day idle-pause** does **not** apply. No heartbeat workflow, no keep-alive commits — cron-job.org keeps POSTing regardless of how quiet the repo is.
-
-> **Actions quota?** Public forks = unlimited and free forever. Private forks use ~1 min/day (30 min/month), well inside the Free plan's 2000 min/month cap. Full table in [⚖️ Will this burn through my GitHub Actions quota?](#️-will-this-burn-through-my-github-actions-quota) below.
-
----
-
-#### 8️⃣ (Optional) Subscribe to failure emails
+#### 7️⃣ (Optional) Subscribe to failure emails
 
 Click the repo's **Watch** → *Custom* → tick **Actions**. GitHub will email you **only** when a workflow fails, so you catch an expired API key or SMTP rejection within minutes instead of noticing a silent empty inbox days later.
 
 ![subscribe](./assets/subscribe.png)
-
-### ⚖️ Will this burn through my GitHub Actions quota?
-
-Short answer: **No — both public and private forks run comfortably inside their free tiers year-round.** Since scheduling moved to cron-job.org (see step 6), GitHub Actions is only invoked **once per day** (plus rare manual dispatches), so the entire quota concern largely disappears.
-
-| Your fork is… | Actions minutes | Storage | Verdict |
-| :--- | :--- | :--- | :--- |
-| **Public** (default when you fork) | **Unlimited & free** | Unlimited & free | ✅ 365-day operation, zero infra cost. Just keep the LLM API key funded. |
-| **Private** | 2000 min/month free (Free plan), 3000 (Pro) | 500 MB / 1 GB | ✅ ~1 min/day × 30 days ≈ **30 min/month**, well inside the 2000-min Free cap. |
-
-cron-job.org itself is free with no per-call limit on their free tier.
 
 ### 🔌 Use a different LLM provider
 
@@ -418,7 +399,7 @@ Notes:
 - **Migrating from `OPENAI_*` names** (existing forks): you don't have to do anything urgently — `OPENAI_API_KEY` / `OPENAI_API_BASE` / `OPENAI_MODEL` / `OPENAI_MAX_TOKENS` and the legacy `llm.generation_kwargs` nested YAML block still work. The workflow log will print a one-line deprecation warning when it falls back. To migrate cleanly: create the four `LLM_*` Secrets/Variables with the same values, delete the `OPENAI_*` ones, and (if you customized `CUSTOM_CONFIG`) flatten `llm.generation_kwargs.{model,max_tokens}` onto `llm.{model,max_tokens}` directly.
 - **Small-model tolerance**: the client auto-strips `<think>…</think>` blocks, Markdown ```` ```json ```` fences, and Python-style single-quoted dicts from JSON responses — so DeepSeek, Qwen, and local Ollama runs don't fall back silently on malformed output.
 - **Reasoning-model quirks**: `o1` / `o3` / `o4` / `gpt-5` require `max_completion_tokens` (not `max_tokens`) and reject `temperature` — the client rewrites both for you automatically.
-- **Timeouts & retries**: `llm.timeout` (default 60 s) and `llm.max_retries` (default 3) are forwarded to LiteLLM so a wedged endpoint can't hang the whole Actions job.
+- **Timeouts & retries**: `llm.timeout` (default 180 s) and `llm.max_retries` (default 3) are forwarded to LiteLLM so a wedged endpoint can't hang the whole Actions job.
 
 ---
 
@@ -466,7 +447,7 @@ arXiv RSS → keyword filter → multi-agent rerank → history merge → Top-N 
 
 - arXiv RSS is the only source. Google Scholar has no stable API and would not survive on GitHub Actions runners.
 - The LLM scoring is only as good as the prompt + model; for niche domains, expect some noise. Raise `max_paper_num` or tune `weights` to taste.
-- Runs **free and unmetered on a public fork**; private forks use ~30 Actions min/month (well inside the Free tier's 2000). See ["Will this burn through my GitHub Actions quota?"](#-will-this-burn-through-my-github-actions-quota) above.
+- Runs **free and unmetered on a public fork**; private forks use ~30 Actions min/month (well inside the Free tier's 2000).
 - Daily scheduling requires a free external account at [cron-job.org](https://cron-job.org) (step 6 of the setup). The workflow no longer embeds a GitHub `schedule:` cron because GitHub's built-in cron drifts 5–15 min and frequently drops fires.
 
 ---
