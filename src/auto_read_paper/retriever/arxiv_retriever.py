@@ -15,6 +15,7 @@ from queue import Empty
 from typing import Any, Callable, TypeVar
 from loguru import logger
 import requests
+import time
 
 # arXiv's HTML rendering service (arxiv.org/html/<id>) is often unavailable for
 # freshly-announced papers. trafilatura logs a noisy ERROR line per 404 that
@@ -164,19 +165,36 @@ class ArxivRetriever(BaseRetriever):
         arXiv returns per-author `<arxiv:affiliation>` tags when submitters provide
         them. Much faster and more reliable than LLM-extracting from PDF text, though
         coverage varies — authors who didn't provide it will simply have no entry.
+
+        Retries on 429 (rate-limit) and transient request errors with exponential
+        backoff — arXiv throttles at ~1 req / 3 s, so a single spike can otherwise
+        lose a whole batch of affiliations.
         """
         if not paper_ids:
             return {}
         id_list = ",".join(paper_ids)
         url = f"http://export.arxiv.org/api/query?id_list={id_list}&max_results={len(paper_ids)}"
-        try:
-            # M8: feedparser has no built-in timeout — fetch bytes ourselves
-            # with an explicit budget so a stalled arXiv can't hang the job.
-            resp = requests.get(url, timeout=(10, 30))
-            resp.raise_for_status()
-            feed = feedparser.parse(resp.content)
-        except Exception as exc:
-            logger.warning(f"Affiliation batch fetch failed: {exc}")
+        max_attempts = 4
+        delay = 3.0
+        feed = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # M8: feedparser has no built-in timeout — fetch bytes ourselves
+                # with an explicit budget so a stalled arXiv can't hang the job.
+                resp = requests.get(url, timeout=(10, 30))
+                if resp.status_code == 429:
+                    raise requests.HTTPError(f"429 rate-limited (attempt {attempt}/{max_attempts})")
+                resp.raise_for_status()
+                feed = feedparser.parse(resp.content)
+                break
+            except Exception as exc:
+                if attempt == max_attempts:
+                    logger.warning(f"Affiliation batch fetch failed after {attempt} attempts: {exc}")
+                    return {}
+                logger.debug(f"Affiliation batch attempt {attempt} failed ({exc}); backing off {delay:.1f}s")
+                time.sleep(delay)
+                delay *= 2
+        if feed is None:
             return {}
 
         out: dict[str, list[str]] = {}
@@ -201,6 +219,32 @@ class ArxivRetriever(BaseRetriever):
             if affs:
                 out[pid] = affs
         return out
+
+    def _prewarm_affiliations(self, raws: list[ArxivResult]) -> None:
+        """Batch-fetch affiliations for a list of raw results and cache them
+        on ``self._affiliations_by_id``. Called before per-paper
+        ``convert_to_paper`` loops on the fallback / keyword-search paths so
+        each paper doesn't fire a separate single-ID request (which trips
+        arXiv's ~3 req/s rate limit and returns 429).
+
+        Sleeps 3s between batches to respect arXiv's published ~1 req / 3s
+        rate limit on the export API.
+        """
+        missing_ids = [
+            self._normalize_paper_id(r.entry_id)
+            for r in raws
+            if self._normalize_paper_id(r.entry_id) not in self._affiliations_by_id
+        ]
+        if not missing_ids:
+            return
+        batches = [missing_ids[i:i + 20] for i in range(0, len(missing_ids), 20)]
+        for idx, batch in enumerate(batches):
+            try:
+                self._affiliations_by_id.update(self._fetch_affiliations(batch))
+            except Exception as exc:
+                logger.debug(f"Prewarm affiliation batch skipped: {exc}")
+            if idx < len(batches) - 1:
+                time.sleep(3.0)
 
     def retrieve_recent_fallback(self, days: int = 3, limit: int = 10) -> list[ArxivResult]:
         """Last-resort fetch: query arXiv API for recent papers in configured categories.
@@ -319,6 +363,7 @@ class ArxivRetriever(BaseRetriever):
     def retrieve_fallback_papers(self, days: int = 3, limit: int = 5) -> list[Paper]:
         """Convenience wrapper: fallback raw results → Paper objects."""
         raws = self.retrieve_recent_fallback(days=days, limit=limit)
+        self._prewarm_affiliations(raws)
         papers: list[Paper] = []
         for r in raws:
             try:
@@ -378,6 +423,7 @@ class ArxivRetriever(BaseRetriever):
         )
 
         papers: list[Paper] = []
+        self._prewarm_affiliations(raws)
         for r in raws:
             try:
                 papers.append(self.convert_to_paper(r))
