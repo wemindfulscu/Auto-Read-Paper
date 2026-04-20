@@ -153,7 +153,7 @@ Click **Fork** on the upstream repo, pick your account as the owner, keep the de
 
 Same page as Secrets — just switch to the **Variables** tab.
 
-![vars](./assets/repo_var.png)
+![vars](./assets/rep_var.png)
 
 > **Where does the daily send time live?** Not here — the workflow has no built-in schedule, it only runs when an external service (cron-job.org) invokes it. Send time is set in the cron-job.org dashboard (step 6️⃣ below), so this variables table contains **no time-related knobs**.
 
