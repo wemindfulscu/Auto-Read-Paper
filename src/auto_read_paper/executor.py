@@ -173,14 +173,20 @@ class Executor:
                     )
                     fill_candidates.extend(matched_spill)
 
-                # (b) actively search arXiv with the expanded keywords
+                # (b) actively search arXiv with the expanded keywords.
+                # Fetch 10× max_paper_num, hard-capped at 100 — fast metadata-
+                # only search, so a wide net is cheap; the Reader + Reviewer
+                # downstream agents will read each candidate's full content
+                # and rank them. The 100-paper ceiling prevents a runaway
+                # expansion (e.g. user sets max_paper_num=50) from DoS-ing
+                # the arXiv API or the downstream LLM budget.
                 arxiv_retriever = self.retrievers.get("arxiv")
                 if arxiv_retriever is not None and hasattr(arxiv_retriever, "search_by_keywords"):
                     try:
                         searched = arxiv_retriever.search_by_keywords(
                             combined,
                             days=7,
-                            limit=max(max_n * 2, 20),
+                            limit=min(max_n * 10, 100),
                         )
                     except Exception as exc:
                         logger.warning(f"Keyword-search fallback failed: {exc}")
