@@ -199,10 +199,7 @@ class LLMClient:
     def from_config(cls, llm_cfg: DictConfig | Mapping) -> "LLMClient":
         """Build from the `config.llm` section.
 
-        Primary schema is flat (`llm.model`, `llm.max_tokens`, ...). The legacy
-        `llm.generation_kwargs.{model,max_tokens,temperature,top_p,...}` nested
-        block is still accepted so pre-rename forks keep working — logs a
-        one-shot deprecation warning when it triggers.
+        Schema is flat: `llm.model`, `llm.max_tokens`, `llm.temperature`, etc.
         """
         if isinstance(llm_cfg, DictConfig):
             cfg = OmegaConf.to_container(llm_cfg, resolve=True) or {}
@@ -210,14 +207,8 @@ class LLMClient:
             cfg = dict(llm_cfg)
 
         api = cfg.get("api") or {}
-        gen_kwargs = cfg.get("generation_kwargs") or {}
-        if gen_kwargs:
-            logger.warning(
-                "config.llm.generation_kwargs is deprecated; flatten its keys "
-                "onto config.llm directly (model / max_tokens / temperature / ...)."
-            )
 
-        model = cfg.get("model") or gen_kwargs.get("model")
+        model = cfg.get("model")
         if not model:
             raise ValueError(
                 "config.llm.model is required — set it to a LiteLLM-style "
@@ -227,16 +218,12 @@ class LLMClient:
             )
 
         max_tokens = cfg.get("max_tokens")
-        if max_tokens is None:
-            max_tokens = gen_kwargs.get("max_tokens")
         try:
             max_tokens = int(max_tokens) if max_tokens not in (None, "") else None
         except (TypeError, ValueError):
             max_tokens = None
 
         temperature = cfg.get("temperature")
-        if temperature is None:
-            temperature = gen_kwargs.get("temperature")
         try:
             temperature = float(temperature) if temperature not in (None, "") else None
         except (TypeError, ValueError):
@@ -250,8 +237,6 @@ class LLMClient:
         for k in ("top_p", "frequency_penalty", "presence_penalty"):
             if k in cfg:
                 extra[k] = cfg[k]
-            elif k in gen_kwargs:
-                extra[k] = gen_kwargs[k]
 
         return cls(
             model=str(model),

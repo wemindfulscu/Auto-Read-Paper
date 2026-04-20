@@ -60,7 +60,7 @@ Construct one `LLMClient` per consumer via `LLMClient.from_config(config.llm)` a
 
 Uses Hydra + OmegaConf. Config is composed from `config/base.yaml` (defaults) + `config/custom.yaml` (user overrides). Environment variables are interpolated via `${oc.env:VAR_NAME,default}` syntax. Entry point uses `@hydra.main`.
 
-Public env vars are `LLM_API_KEY` / `LLM_API_BASE` / `LLM_MODEL` / `LLM_MAX_TOKENS`. The legacy `OPENAI_*` names are honored as a deprecation-shim fallback so pre-rename forks keep running — use of the legacy name emits a workflow `::warning::` and a `loguru` warning. The legacy nested `llm.generation_kwargs.{model,max_tokens,...}` block is similarly accepted with a deprecation warning. When renaming any user-facing env var or config key in the future, follow the same two-speed policy (hard rename internals, compat shim public names).
+Public env vars are `LLM_API_KEY` / `LLM_API_BASE` / `LLM_MODEL` / `LLM_MAX_TOKENS`. Only these unified names are accepted — no legacy `OPENAI_*` fallback.
 
 ### Data Classes
 

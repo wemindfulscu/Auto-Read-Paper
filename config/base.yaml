@@ -13,13 +13,10 @@ email:
 
 llm:
   api:
-    # Primary: LLM_API_KEY. Falls back to legacy OPENAI_API_KEY so existing forks
-    # keep working without an immediate Secrets migration. The OPENAI_* fallback
-    # is a deprecation shim — drop it once your fork is fully migrated.
-    key: ${oc.env:LLM_API_KEY,${oc.env:OPENAI_API_KEY,""}}
-    base_url: ${oc.env:LLM_API_BASE,${oc.env:OPENAI_API_BASE,""}}
-  model: ${oc.env:LLM_MODEL,${oc.env:OPENAI_MODEL,gpt-4o-mini}} # LiteLLM-style model id. Examples: openai/gpt-4o-mini, openai/o3-mini, anthropic/claude-sonnet-4-6, gemini/gemini-2.0-flash, deepseek/deepseek-chat, ollama/qwen2.5:7b-instruct.
-  max_tokens: ${oc.env:LLM_MAX_TOKENS,${oc.env:OPENAI_MAX_TOKENS,4096}} # Output token cap. Auto-renamed to max_completion_tokens for o-series / gpt-5.
+    key: ${oc.env:LLM_API_KEY,""}
+    base_url: ${oc.env:LLM_API_BASE,""}
+  model: ${oc.env:LLM_MODEL,gpt-4o-mini} # LiteLLM-style model id. Examples: openai/gpt-4o-mini, openai/o3-mini, anthropic/claude-sonnet-4-6, gemini/gemini-2.0-flash, deepseek/deepseek-chat, ollama/qwen2.5:7b-instruct.
+  max_tokens: ${oc.env:LLM_MAX_TOKENS,4096} # Output token cap. Auto-renamed to max_completion_tokens for o-series / gpt-5.
   temperature: 0.3 # Ignored for reasoning models (o-series, gpt-5).
   timeout: 60 # Per-request timeout in seconds. Prevents a hung local Ollama from wedging the job.
   max_retries: 3 # LiteLLM-level retry count on 429/5xx.

@@ -209,17 +209,6 @@ def test_from_config_new_schema():
     assert c.max_retries == 5
 
 
-def test_from_config_legacy_generation_kwargs():
-    """Pre-rename forks had llm.generation_kwargs.{model,max_tokens} — still honored."""
-    cfg = {
-        "api": {"key": "sk-legacy", "base_url": "https://api.openai.com/v1"},
-        "generation_kwargs": {"model": "gpt-4o-mini", "max_tokens": 4096},
-    }
-    c = LLMClient.from_config(cfg)
-    assert c.model == "openai/gpt-4o-mini"
-    assert c.max_tokens == 4096
-
-
 def test_from_config_missing_model_raises():
     with pytest.raises(ValueError, match="config.llm.model is required"):
         LLMClient.from_config({"api": {"key": "sk"}})

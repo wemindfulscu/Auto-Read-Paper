@@ -51,45 +51,16 @@ jobs:
           SENDER: ${{ secrets.SENDER }}
           RECEIVER: ${{ secrets.RECEIVER }}
           SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-          # Primary unified LLM credentials.
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_BASE: ${{ secrets.LLM_API_BASE }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
           LLM_MAX_TOKENS: ${{ vars.LLM_MAX_TOKENS }}
-          # Deprecated fallbacks — kept so pre-rename forks keep running. Migrate
-          # to the LLM_* names above and delete these rows once done.
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
-          OPENAI_MAX_TOKENS: ${{ vars.OPENAI_MAX_TOKENS }}
           CUSTOM_CONFIG: ${{ vars.CUSTOM_CONFIG }}
         run: |
-          # GitHub Actions sets env vars for missing secrets to the EMPTY
-          # STRING, not unset. OmegaConf's ${oc.env:LLM_API_KEY,fallback}
-          # only walks the fallback when the env var is totally unset — an
-          # empty LLM_API_KEY wins over a populated OPENAI_API_KEY and the
-          # API key resolves to "". Symptom: rerank/tldr all silently fail,
-          # email ships with the raw English abstract. Promote OPENAI_* →
-          # LLM_* here so exactly one name reaches Python, populated.
-          promoted_any=0
-          promote() {
-            local new="$1" old="$2"
-            if [ -z "${!new:-}" ] && [ -n "${!old:-}" ]; then
-              export "$new=${!old}"
-              echo "::warning::Using $old (deprecated). Rename your repo secret/variable to $new — see README."
-              promoted_any=1
-            fi
-          }
-          promote LLM_API_KEY    OPENAI_API_KEY
-          promote LLM_API_BASE   OPENAI_API_BASE
-          promote LLM_MODEL      OPENAI_MODEL
-          promote LLM_MAX_TOKENS OPENAI_MAX_TOKENS
-
           if [ -z "${LLM_API_KEY:-}" ]; then
-            echo "::error::Neither LLM_API_KEY nor OPENAI_API_KEY is set."
+            echo "::error::LLM_API_KEY secret is not set. Configure it under Settings → Secrets and variables → Actions."
             exit 1
           fi
-          [ "$promoted_any" = "0" ] && echo "Using LLM_* names (new)."
           echo "Effective model: ${LLM_MODEL:-gpt-4o-mini}"
           echo "Effective max_tokens: ${LLM_MAX_TOKENS:-4096}"
 
