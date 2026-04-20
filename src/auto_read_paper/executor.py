@@ -133,13 +133,13 @@ class Executor:
         max_n = max(0, int(self.config.executor.max_paper_num))
         top_papers = pool[:max_n]
 
-        # Spillover fill: if the keyword-matched pool doesn't reach max_n,
-        # ask the LLM to broaden the keyword set (synonyms, abbreviations,
-        # adjacent subtopics), then actively query arXiv with the expanded
-        # keywords to pull in topically-related papers we didn't see in
-        # today's RSS. We also re-filter today's keyword-rejected papers
-        # against the expanded set as a cheap bonus. Already-scored and
-        # already-sent papers are excluded so nothing re-surfaces.
+        # Pool-short fallback: today's RSS is retrieved in full (no cap) and
+        # filtered by the user's exact keywords. Only when that primary pool
+        # plus unsent history still doesn't reach max_n do we broaden: ask
+        # the LLM to expand the keyword set (synonyms, abbreviations,
+        # adjacent subtopics), then actively query arXiv's past 7 days for
+        # related papers we haven't seen yet. Already-scored and already-sent
+        # IDs are excluded so nothing re-surfaces.
         if len(top_papers) < max_n and keywords:
             already_scored = self.history.existing_ids() if self.history is not None else set()
             sent_ids = (
@@ -149,7 +149,7 @@ class Executor:
             )
             logger.info(
                 f"Pool short ({len(top_papers)}/{max_n}) — expanding keywords "
-                f"via LLM and actively searching arXiv for related papers"
+                f"via LLM and searching arXiv's past 7 days for related papers"
             )
             expanded = _expand_keywords(self.llm, keywords)
             if expanded:
@@ -174,19 +174,19 @@ class Executor:
                     fill_candidates.extend(matched_spill)
 
                 # (b) actively search arXiv with the expanded keywords.
-                # Fetch 10× max_paper_num, hard-capped at 100 — fast metadata-
-                # only search, so a wide net is cheap; the Reader + Reviewer
-                # downstream agents will read each candidate's full content
-                # and rank them. The 100-paper ceiling prevents a runaway
-                # expansion (e.g. user sets max_paper_num=50) from DoS-ing
-                # the arXiv API or the downstream LLM budget.
+                # Fetch 5× max_paper_num, hard-capped at 100 — fast metadata-
+                # only search, so a moderately wide net is cheap; the
+                # Reader + Reviewer downstream agents read each candidate's
+                # full content and rank them. The 100-paper ceiling prevents
+                # a runaway expansion (e.g. user sets max_paper_num=50) from
+                # DoS-ing the arXiv API or the downstream LLM budget.
                 arxiv_retriever = self.retrievers.get("arxiv")
                 if arxiv_retriever is not None and hasattr(arxiv_retriever, "search_by_keywords"):
                     try:
                         searched = arxiv_retriever.search_by_keywords(
                             combined,
                             days=7,
-                            limit=min(max_n * 10, 100),
+                            limit=min(max_n * 5, 100),
                         )
                     except Exception as exc:
                         logger.warning(f"Keyword-search fallback failed: {exc}")
