@@ -93,14 +93,13 @@ jobs:
       # run would re-pick the same papers from the unsent pool.
       #
       # actions/cache/save refuses to overwrite an existing key, so delete
-      # the old entry first. `continue-on-error: true` handles the first-ever
-      # run (nothing to delete yet) gracefully.
+      # the old entry first. `|| true` swallows the "not found" error on the
+      # first-ever run (nothing to delete yet).
       - name: Delete previous cache entry
         if: always()
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh cache delete score-history-v1 --repo "$GITHUB_REPOSITORY"
+        run: gh cache delete score-history-v1 --repo "$GITHUB_REPOSITORY" || true
 
       - name: Save rolling score history
         if: always()

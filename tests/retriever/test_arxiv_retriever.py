@@ -1,12 +1,25 @@
 """Tests for ArxivRetriever."""
 
+import sys
 import time
 from types import SimpleNamespace
 
 import feedparser
+import pytest
 
 from auto_read_paper.retriever.arxiv_retriever import ArxivRetriever, _run_with_hard_timeout
 import auto_read_paper.retriever.arxiv_retriever as arxiv_retriever
+
+
+# `_run_with_hard_timeout` uses multiprocessing.Process. On Linux the default
+# start method is `fork` (near-instant), but Windows only supports `spawn`
+# which adds ~1s of Python interpreter startup per subprocess. Tests below
+# assume the fork-speed contract, so short-timeout assertions race against
+# spawn overhead. CI runs on Linux where this is not an issue.
+_skip_on_windows = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="multiprocessing spawn startup exceeds test timeout on Windows; Linux CI covers it",
+)
 
 
 def _sleep_and_return(value: str, delay_seconds: float) -> str:
@@ -63,6 +76,7 @@ def test_arxiv_retriever(config, mock_feedparser, monkeypatch):
     assert set(p.title for p in papers) == set(e.title for e in new_entries)
 
 
+@_skip_on_windows
 def test_run_with_hard_timeout_returns_value():
     result = _run_with_hard_timeout(
         _sleep_and_return, ("done", 0.01), timeout=1, operation="test op", paper_title="paper"
@@ -70,6 +84,7 @@ def test_run_with_hard_timeout_returns_value():
     assert result == "done"
 
 
+@_skip_on_windows
 def test_run_with_hard_timeout_returns_none_on_timeout(monkeypatch):
     warnings: list[str] = []
     monkeypatch.setattr(arxiv_retriever, "logger", SimpleNamespace(warning=warnings.append))
@@ -80,6 +95,7 @@ def test_run_with_hard_timeout_returns_none_on_timeout(monkeypatch):
     assert "timed out" in warnings[0]
 
 
+@_skip_on_windows
 def test_run_with_hard_timeout_returns_none_on_failure(monkeypatch):
     warnings: list[str] = []
     monkeypatch.setattr(arxiv_retriever, "logger", SimpleNamespace(warning=warnings.append))

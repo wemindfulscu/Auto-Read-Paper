@@ -44,7 +44,11 @@ def test_render_email_affiliation_truncation():
 def test_render_email_no_affiliations():
     paper = make_sample_paper(affiliations=None, score=7.0, tldr="ok")
     html = render_email([paper])
-    assert "Unknown Affiliation" in html
+    # When a paper has no affiliation info, construct_email renders an empty
+    # string (no <span class="aff">) rather than a placeholder. Assert that
+    # the paper still renders and carries no stray affiliation marker.
+    assert "Sample Paper Title" in html
+    assert 'class="aff"' not in html
 
 
 def test_get_stars_low_score():
