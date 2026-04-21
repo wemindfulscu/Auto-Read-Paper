@@ -22,10 +22,37 @@ from .keyword_llm import _normalize_keywords, count_keyword_hits
 
 READER_SYSTEM_PROMPT = (
     "You are a fast paper reader. Read the given title, abstract, and a preview of "
-    "the main content, then produce CONCISE structured notes. "
+    "the main content, then produce CONCISE structured notes AND judge whether the "
+    "paper's CORE research belongs to the user's keyword domain(s).\n"
+    "\n"
+    "DOMAIN RELEVANCE — READ CAREFULLY:\n"
+    "  • Judge based on the paper's CORE TASK, METHOD, and CONTRIBUTIONS — NOT on "
+    "    whether the keywords merely appear in the intro/related-work as background "
+    "    citation or motivation.\n"
+    "  • Example: a paper whose core contribution is a new reinforcement-learning "
+    "    algorithm for robotic manipulation, which only mentions \"autonomous driving\" "
+    "    once as motivation, is NOT in the autonomous-driving domain.\n"
+    "  • Example: a paper that uses \"diffusion models\" as an off-the-shelf component "
+    "    to study a different problem (e.g. protein folding) is NOT in the "
+    "    diffusion-model domain unless the core contribution is a new diffusion technique.\n"
+    "\n"
+    "Output one of three values for domain_relevant:\n"
+    "  • \"yes\"      — the paper's main contribution sits squarely inside at least one keyword.\n"
+    "  • \"no\"       — clearly outside; the keyword is only a passing mention.\n"
+    "  • \"uncertain\" — you cannot tell from the given content (ambiguous framing, "
+    "    partial text, keyword is arguably central but not definitively). A senior "
+    "    reviewer will adjudicate these later — DO NOT guess \"yes\" or \"no\" just "
+    "    to avoid \"uncertain\".\n"
+    "If no keywords are provided, set domain_relevant = \"yes\".\n"
+    "\n"
     "Return ONLY a compact JSON object with keys "
-    '"task", "method", "contributions", "results", "limitations". '
-    "Each value should be a single sentence (<= 30 words). No prose outside the JSON."
+    '"task", "method", "contributions", "results", "limitations", '
+    '"domain_relevant", "relevance_reason". '
+    "Each note value should be a single sentence (<= 30 words). "
+    'domain_relevant is one of "yes" / "no" / "uncertain"; relevance_reason is one '
+    "short sentence (<= 25 words) explaining which keyword matches the CORE "
+    "contribution (or why none does, or why it's ambiguous). "
+    "No prose outside the JSON."
 )
 
 REVIEWER_SYSTEM_PROMPT = (
@@ -59,6 +86,29 @@ REVIEWER_SYSTEM_PROMPT = (
 )
 
 
+ADJUDICATOR_SYSTEM_PROMPT = (
+    "You are a senior research reviewer acting as a domain-relevance adjudicator. "
+    "A junior Reader could not confidently decide whether each paper's CORE "
+    "contribution lies inside the user's keyword domain(s). Your job is the "
+    "final yes/no decision, one paper at a time, based on the Reader's notes "
+    "(task, method, contributions, results, limitations) plus the Reader's "
+    "own hesitation reason.\n"
+    "\n"
+    "RULES:\n"
+    "  • \"yes\" only if the paper's main contribution, problem, or method "
+    "    sits squarely inside at least one of the user's keywords. A keyword "
+    "    appearing only as motivation, citation, or an off-the-shelf component "
+    "    does NOT count.\n"
+    "  • \"no\" otherwise. When genuinely ambiguous, prefer \"no\" — the user "
+    "    would rather miss a borderline paper than read an off-topic one.\n"
+    "  • You MUST decide for every id given. No \"uncertain\" output.\n"
+    "\n"
+    "Return ONLY a compact JSON object: "
+    '{"verdicts": [{"id": <int>, "relevant": true|false, "reason": "<one short sentence>"}, ...]} '
+    "including every id you were given."
+)
+
+
 def _normalize_reader_notes(data) -> dict | None:
     if not isinstance(data, dict):
         return None
@@ -66,6 +116,30 @@ def _normalize_reader_notes(data) -> dict | None:
     for k in ("task", "method", "contributions", "results", "limitations"):
         v = data.get(k)
         out[k] = str(v).strip() if v is not None else ""
+    # Tri-state domain relevance: "yes" / "no" / "uncertain".
+    # Back-compat: accept legacy bool/numeric/truthy-string forms and map them
+    # to yes/no. Default to "uncertain" when the field is missing so older
+    # model responses go to the Reviewer adjudication path instead of being
+    # silently admitted or silently dropped.
+    raw = data.get("domain_relevant", "uncertain")
+    if isinstance(raw, bool):
+        rel = "yes" if raw else "no"
+    elif isinstance(raw, (int, float)):
+        rel = "yes" if raw else "no"
+    elif isinstance(raw, str):
+        s = raw.strip().lower()
+        if s in {"yes", "true", "1", "y", "t", "relevant"}:
+            rel = "yes"
+        elif s in {"no", "false", "0", "n", "f", "irrelevant"}:
+            rel = "no"
+        elif s in {"uncertain", "maybe", "unsure", "unknown", "ambiguous"}:
+            rel = "uncertain"
+        else:
+            rel = "uncertain"
+    else:
+        rel = "uncertain"
+    out["domain_relevant"] = rel
+    out["relevance_reason"] = str(data.get("relevance_reason", "")).strip()[:300]
     return out
 
 
@@ -212,6 +286,80 @@ class ReaderReviewerReranker(BaseReranker):
             return True
         return False
 
+    def _adjudicate_uncertain(
+        self, uncertain: list[tuple[int, Paper, dict]]
+    ) -> dict[int, dict] | None:
+        """Ask the Reviewer to give a final yes/no on Reader-uncertain papers.
+
+        Returns {paper_id: {"relevant": bool, "reason": str}} or None on
+        failure. Caller is conservative on None (drops all uncertain).
+        """
+        if not uncertain:
+            return {}
+        expected_ids = {pid for pid, _, _ in uncertain}
+        lines = [
+            f"User research keywords: {', '.join(self.keywords) if self.keywords else '(not provided)'}",
+            f"Number of papers to adjudicate: {len(uncertain)}",
+            "",
+            "Papers:",
+        ]
+        for pid, paper, note in uncertain:
+            lines.append(f"--- id: {pid} ---")
+            lines.append(f"Title: {paper.title}")
+            lines.append(f"Task: {note.get('task', '')}")
+            lines.append(f"Method: {note.get('method', '')}")
+            lines.append(f"Contributions: {note.get('contributions', '')}")
+            lines.append(f"Results: {note.get('results', '')}")
+            lines.append(f"Limitations: {note.get('limitations', '')}")
+            lines.append(f"Reader's hesitation: {note.get('relevance_reason', '')}")
+            lines.append("")
+        lines.append(
+            'Return JSON only: {"verdicts": [{"id": <int>, "relevant": true|false, '
+            '"reason": "..."}, ...]} including every id above.'
+        )
+        prompt = "\n".join(lines)
+
+        from ..protocol import _wrap_untrusted
+        try:
+            data = self.llm.complete_json(
+                system=ADJUDICATOR_SYSTEM_PROMPT,
+                user=_wrap_untrusted(prompt),
+                expect="object",
+            )
+        except Exception as e:
+            logger.warning(f"Adjudicator call raised: {e}")
+            return None
+        if not isinstance(data, dict):
+            return None
+        verdicts = data.get("verdicts")
+        if not isinstance(verdicts, list):
+            return None
+        out: dict[int, dict] = {}
+        for item in verdicts:
+            if not isinstance(item, dict):
+                continue
+            try:
+                pid = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if pid not in expected_ids or pid in out:
+                continue
+            rel_raw = item.get("relevant")
+            if isinstance(rel_raw, bool):
+                rel = rel_raw
+            elif isinstance(rel_raw, (int, float)):
+                rel = bool(rel_raw)
+            elif isinstance(rel_raw, str):
+                rel = rel_raw.strip().lower() in {"true", "yes", "1", "y", "t"}
+            else:
+                # Conservative: treat malformed/missing as not relevant.
+                rel = False
+            out[pid] = {
+                "relevant": rel,
+                "reason": str(item.get("reason", ""))[:300],
+            }
+        return out if out else None
+
     def _review_batch(self, paper_notes: list[tuple[int, Paper, dict]]) -> list[dict] | None:
         if not paper_notes:
             return None
@@ -312,6 +460,82 @@ class ReaderReviewerReranker(BaseReranker):
             for p in candidates:
                 p.score = 0.0
             return candidates
+
+        # Tri-state domain-relevance gate: yes / no / uncertain.
+        # - "no"        → dropped immediately.
+        # - "uncertain" → adjudicated by the Reviewer (second-opinion call).
+        # Only applies when the user configured keywords AND we're not in a
+        # skip_keyword_filter rescue pass — during rescue the executor is
+        # deliberately widening the net and should not be double-filtered.
+        if self.keywords and not skip_keyword_filter:
+            kept, dropped, uncertain = [], [], []
+            for triple in paper_notes:
+                _i, paper, note = triple
+                rel = note.get("domain_relevant", "uncertain")
+                if rel == "yes":
+                    kept.append(triple)
+                elif rel == "no":
+                    dropped.append((paper, note.get("relevance_reason", "")))
+                else:
+                    uncertain.append(triple)
+
+            if uncertain:
+                logger.info(
+                    f"Domain-relevance gate: {len(uncertain)} paper(s) flagged "
+                    f"uncertain by Reader — asking Reviewer to adjudicate."
+                )
+                verdicts = self._adjudicate_uncertain(uncertain)
+                if verdicts is None:
+                    # Adjudicator failed. Fall back to the conservative
+                    # default (drop) so off-topic papers don't slip through
+                    # just because the second-opinion call errored.
+                    logger.warning(
+                        "Adjudicator call failed or returned unparseable JSON — "
+                        "conservatively dropping all uncertain papers."
+                    )
+                    for _i, paper, note in uncertain:
+                        dropped.append(
+                            (paper, note.get("relevance_reason", "") + " [adjudicator failed]")
+                        )
+                else:
+                    for triple in uncertain:
+                        _i, paper, note = triple
+                        v = verdicts.get(_i)
+                        if v is None:
+                            # Adjudicator silently dropped this id. Be
+                            # conservative: drop it.
+                            dropped.append(
+                                (paper, note.get("relevance_reason", "") + " [no adjudicator verdict]")
+                            )
+                        elif v.get("relevant"):
+                            logger.info(
+                                f"  adjudicator→KEEP: {paper.title[:90]} — "
+                                f"{v.get('reason', '')}"
+                            )
+                            kept.append(triple)
+                        else:
+                            logger.info(
+                                f"  adjudicator→DROP: {paper.title[:90]} — "
+                                f"{v.get('reason', '')}"
+                            )
+                            dropped.append((paper, v.get("reason", "")))
+
+            if dropped:
+                logger.info(
+                    f"Domain-relevance gate: dropped {len(dropped)}/{len(paper_notes)} "
+                    f"paper(s) whose core contribution is outside the keyword domain"
+                )
+                for p, reason in dropped[:10]:
+                    logger.info(f"  drop: {p.title[:90]} — {reason or '(no reason)'}")
+                if len(dropped) > 10:
+                    logger.info(f"  ... and {len(dropped) - 10} more")
+            paper_notes = kept
+            if not paper_notes:
+                logger.warning(
+                    "Domain-relevance gate removed every paper — returning empty. "
+                    "Executor will fall through to its pool-short rescue logic."
+                )
+                return []
 
         logger.info(f"Reviewer agent: ranking {len(paper_notes)} papers in one batch call...")
         rankings = self._review_batch(paper_notes)
